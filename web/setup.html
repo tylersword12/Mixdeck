@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up MixDeck</title>
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+<style>
+  body { min-height: 100vh; display: flex; flex-direction: column; }
+  .wz-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 28px; border-bottom: 1px solid var(--line); }
+  .dots { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .dot { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; padding: 4px 10px; border-radius: 999px; }
+  .dot b { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: var(--panel2); font-size: 11px; font-weight: 700; }
+  .dot.on { color: var(--text); background: var(--panel); }
+  .dot.on b { background: var(--accent); color: #0d0b1f; }
+  .dot.done b { background: rgba(70,211,154,.2); color: var(--ok); }
+  @media (max-width: 900px) { .dot span { display: none; } }
+  .wz { flex: 1; width: 100%; max-width: 760px; margin: 0 auto; padding: 32px 28px 120px; }
+  .wz h1 { font-size: 28px; letter-spacing: -.02em; margin: 0 0 6px; }
+  .wz .lead { color: var(--muted); font-size: 16px; margin: 0 0 24px; }
+  .steps { counter-reset: st; list-style: none; padding: 0; margin: 0 0 18px; }
+  .steps > li { counter-increment: st; position: relative; padding: 14px 16px 14px 56px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; margin-bottom: 10px; }
+  .steps > li::before { content: counter(st); position: absolute; left: 16px; top: 14px; width: 26px; height: 26px; border-radius: 50%; background: var(--panel2); display: grid; place-items: center; font-weight: 700; font-size: 13px; }
+  .steps > li.ok::before { content: "✓"; background: rgba(70,211,154,.2); color: var(--ok); }
+  .steps p { margin: 4px 0 8px; color: var(--muted); font-size: 14px; }
+  .copy { display: flex; gap: 8px; align-items: center; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 6px 6px 12px; margin: 6px 0; }
+  .copy code { flex: 1; font-size: 13px; word-break: break-all; }
+  .wz-bottom { position: fixed; left: 0; right: 0; bottom: 0; background: rgba(15,15,20,.95); border-top: 1px solid var(--line); padding: 14px 28px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .wz-bottom .right { display: flex; gap: 10px; align-items: center; }
+  .choice { display: flex; gap: 14px; align-items: flex-start; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; margin-bottom: 10px; cursor: pointer; }
+  .choice input { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--accent); }
+  .choice .t { font-weight: 700; }
+  .choice .d { color: var(--muted); font-size: 14px; }
+  .progress { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; margin: 10px 0 6px; }
+  .progress > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+  .card-row { display: flex; gap: 14px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin: 12px 0; }
+  .card-row .art { width: 56px; height: 56px; border-radius: 50%; background: var(--panel2) center/cover; flex: none; }
+  .big-check { font-size: 56px; line-height: 1; color: var(--ok); margin-bottom: 8px; }
+  .note { background: rgba(243,192,79,.08); border: 1px solid rgba(243,192,79,.3); color: var(--text); border-radius: 10px; padding: 10px 14px; font-size: 14px; margin: 12px 0; }
+  .err { color: var(--bad); font-size: 14px; margin: 6px 0; }
+</style>
+<script src="vendor/qrcode.js"></script>
+<script src="common.js"></script>
+<script src="setup.js" defer></script>
+</head>
+<body>
+  <header class="wz-top">
+    <div class="logo">MixDeck <span class="muted">setup</span></div>
+    <div class="dots" id="dots"></div>
+  </header>
+  <main class="wz" id="wz"></main>
+  <footer class="wz-bottom">
+    <button class="ghost" id="back">Back</button>
+    <div class="right">
+      <a href="#" id="skip" class="muted small">Skip this step</a>
+      <button class="primary" id="next">Next</button>
+    </div>
+  </footer>
+  <div class="toast" id="toast"></div>
+</body>
+</html>

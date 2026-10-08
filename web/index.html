@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f0f14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>MixDeck</title>
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+<script src="vendor/qrcode.js"></script>
+<script src="common.js"></script>
+<script src="remote.js" defer></script>
+</head>
+<body class="remote">
+  <header class="r-head">
+    <div class="logo">MixDeck</div>
+    <span id="hoststatus" class="pill wait">Connecting…</span>
+  </header>
+  <div id="banner" class="banner"></div>
+
+  <nav class="tabs" id="tabs">
+    <button class="t-queue" data-view="queue"><span class="i">≡</span>Queue</button>
+    <button data-view="search"><span class="i">⌕</span>Search</button>
+    <button data-view="library"><span class="i">♫</span>Library</button>
+    <button data-view="saved"><span class="i">★</span>Playlists</button>
+    <button data-view="settings"><span class="i">⚙</span>Settings</button>
+  </nav>
+
+  <div class="layout">
+    <section id="v-queue" class="view">
+      <div id="np"></div>
+      <div class="row-actions">
+        <button class="ghost" id="q-save">Save as playlist</button>
+        <button class="ghost" id="q-shuffle">Shuffle upcoming</button>
+        <button class="ghost danger" id="q-clear">Clear</button>
+      </div>
+      <ul id="queue" class="list"></ul>
+    </section>
+
+    <div class="right">
+      <section id="v-search" class="view">
+        <div class="seg" id="search-src">
+          <button data-src="spotify" class="on">Spotify</button>
+          <button data-src="soundcloud">SoundCloud</button>
+          <button data-src="youtube">YouTube</button>
+        </div>
+        <form id="search-form"><input id="search-q" type="search" placeholder="Search songs, or paste a Spotify, SoundCloud or YouTube link" autocomplete="off"></form>
+        <div id="search-results"></div>
+      </section>
+
+      <section id="v-library" class="view">
+        <div class="seg" id="lib-src">
+          <button data-src="spotify" class="on">Spotify</button>
+          <button data-src="soundcloud">SoundCloud</button>
+        </div>
+        <div id="library"></div>
+      </section>
+
+      <section id="v-saved" class="view"><div id="saved"></div></section>
+
+      <section id="v-settings" class="view"><div id="settings"></div></section>
+    </div>
+  </div>
+
+  <div class="mini" id="mini"></div>
+
+  <div class="sheet-bg" id="sheet-bg"></div>
+  <div class="sheet" id="sheet"></div>
+  <div class="toast" id="toast"></div>
+</body>
+</html>
