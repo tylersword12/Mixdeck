@@ -124,7 +124,7 @@ pub struct Settings {
     pub player_host: String,
     #[serde(default)]
     pub setup_done: bool,
-    #[serde(default = "d_true")]
+    #[serde(default = "d_close_to_tray")]
     pub close_to_tray: bool,
     #[serde(default)]
     pub start_with_windows: bool,
@@ -134,13 +134,15 @@ fn d_crossfade() -> f64 { 8.0 }
 fn d_cache() -> u64 { 1024 }
 fn d_ahead() -> u32 { 2 }
 fn d_player_host() -> String { "auto".into() }
-fn d_true() -> bool { true }
+/// Linux desktops don't always show tray icons (GNOME needs an extension), so closing
+/// the window quits there unless the user turns this on.
+fn d_close_to_tray() -> bool { !cfg!(target_os = "linux") }
 
 impl Default for Settings {
     fn default() -> Self {
         Settings {
             crossfade: 8.0, spotify_safe: false, cache_mb: 1024, preload_ahead: 2, port: None,
-            player_host: "auto".into(), setup_done: false, close_to_tray: true, start_with_windows: false,
+            player_host: "auto".into(), setup_done: false, close_to_tray: d_close_to_tray(), start_with_windows: false,
         }
     }
 }

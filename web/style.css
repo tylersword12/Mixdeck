@@ -202,3 +202,7 @@ select { width: 100%; background: var(--panel2); border: 1px solid var(--line); 
 /* Round transport buttons: override the generic pill-button padding/alignment so the
    icon sits dead centre. */
 button.round, button.round.primary { display: grid; place-items: center; padding: 0; gap: 0; border-radius: 50%; }
+
+/* Phones that draw the app under the status bar / notch */
+.r-head { padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
+.wz-top { padding-top: calc(18px + env(safe-area-inset-top, 0px)); }

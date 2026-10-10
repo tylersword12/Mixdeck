@@ -69,13 +69,13 @@ const VIEWS = {
       <h3>Which services do you want to use?</h3>
       <label class="choice"><input type="checkbox" data-svc="spotify" ${W.use.spotify ? 'checked' : ''}><div><div class="t">Spotify</div><div class="d">Needs Spotify Premium and a free Spotify developer app. The next step walks you through it.</div></div></label>
       <label class="choice"><input type="checkbox" data-svc="soundcloud" ${W.use.soundcloud ? 'checked' : ''}><div><div class="t">SoundCloud</div><div class="d">Works right away. Add your profile to see your likes and playlists.</div></div></label>
-      <label class="choice"><input type="checkbox" data-svc="youtube" ${W.use.youtube ? 'checked' : ''}><div><div class="t">YouTube</div><div class="d">MixDeck downloads two small helper tools for this.</div></div></label>
-      <h3>Used the earlier version of MixDeck?</h3>
+      <label class="choice"><input type="checkbox" data-svc="youtube" ${W.use.youtube ? 'checked' : ''}><div><div class="t">YouTube</div><div class="d">${W.info.platform === 'android' ? 'Built in, nothing to set up.' : 'MixDeck downloads two small helper tools for this.'}</div></div></label>
+      ${W.info.platform === 'android' ? '' : `<h3>Used the earlier version of MixDeck?</h3>
       <p class="muted">Bring over your Spotify login, SoundCloud profile, settings and saved playlists from the old MixDeck folder.</p>
       <div class="row-actions"><button class="ghost" id="import">Import from the old MixDeck folder</button></div>
-      <div id="import-result"></div>`;
+      <div id="import-result"></div>`}`;
     box.querySelectorAll('[data-svc]').forEach(cb => cb.onchange = () => { W.use[cb.dataset.svc] = cb.checked; renderDots(); });
-    $('#import').onclick = async () => {
+    if ($('#import')) $('#import').onclick = async () => {
       try {
         const r = await api('/api/import', { method: 'POST' });
         if (r.cancelled) return;
@@ -178,7 +178,7 @@ const VIEWS = {
       if (t.ready && !ins.running) {
         $('#yt-step').innerHTML = '<b style="color:var(--ok)">✓ YouTube is ready</b>';
         bar.style.width = '100%';
-        $('#yt-detail').textContent = `yt-dlp ${t.ytdlp.version || ''} · JavaScript runtime: ${t.js ? (t.js.kind === 'node' ? 'Node.js (already installed)' : 'Deno') : 'none'}`;
+        $('#yt-detail').textContent = t.builtin ? 'Using MixDeck\'s built-in YouTube support.' : `yt-dlp ${t.ytdlp.version || ''} · JavaScript runtime: ${t.js ? (t.js.kind === 'node' ? 'Node.js (already installed)' : 'Deno') : 'none'}`;
         $('#yt-retry').style.display = 'none';
         clearTimers();
       } else if (ins.error) {
@@ -203,11 +203,12 @@ const VIEWS = {
   phone(box) {
     const urls = W.info.lanUrls;
     box.innerHTML = `
-      <h1>Control it from your phone</h1>
-      <p class="lead">Any phone or computer on the same Wi-Fi can open MixDeck in its browser to search, build the queue and skip songs.</p>
+      <h1>${W.info.platform === 'android' ? 'Control it from other devices' : 'Control it from your phone'}</h1>
+      <p class="lead">${W.info.platform === 'android' ? 'Music plays from this phone. Other phones and computers on the same Wi-Fi can open MixDeck in their browser to search, build the queue and skip songs. This is optional.' : 'Any phone or computer on the same Wi-Fi can open MixDeck in its browser to search, build the queue and skip songs.'}</p>
       ${urls.length ? `<div class="card-row"><div class="qr" id="qr" style="width:150px;height:150px"></div><div><div class="lbl">Scan with your phone's camera, or type</div><div class="url" style="font-size:18px">${urls.map(esc).join('<br>')}</div><div class="muted small">On iPhone, use Share → Add to Home Screen to open it like an app.</div></div></div>`
         : '<div class="note">This PC doesn\'t seem to be on a network right now. Connect to Wi-Fi to use your phone as a remote.</div>'}
-      <div class="note"><b>If Windows asks about the firewall</b>, tick <b>Private networks</b> and click <b>Allow</b>. Without that, phones can't reach MixDeck. If you missed it: Windows Security → Firewall &amp; network protection → Allow an app through firewall → tick MixDeck.</div>`;
+      ${W.info.platform === 'windows' ? `<div class="note"><b>If Windows asks about the firewall</b>, tick <b>Private networks</b> and click <b>Allow</b>. Without that, phones can't reach MixDeck. If you missed it: Windows Security → Firewall &amp; network protection → Allow an app through firewall → tick MixDeck.</div>` : ''}
+      ${W.info.platform === 'linux' ? `<div class="note">If your firewall is on (for example <code>ufw</code>), allow port ${W.info.port}/tcp so other devices can connect.</div>` : ''}`;
     if (urls.length && window.qrcode) {
       const qr = qrcode(0, 'M'); qr.addData(urls[0]); qr.make();
       $('#qr').innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
@@ -225,17 +226,17 @@ const VIEWS = {
         ${W.use.spotify ? `<label class="switch" style="margin-top:14px"><input type="checkbox" id="spsafe" ${s.spotifySafe ? 'checked' : ''}> Spotify-safe transitions</label>
         <p>Spotify's developer rules don't allow Spotify songs to overlap other audio. Turn this on to follow them: songs involving Spotify won't overlap, and the rest still crossfade.</p>` : ''}
       </div>
-      <div class="set">
-        <label class="switch"><input type="checkbox" id="autostart" ${s.startWithWindows ? 'checked' : ''}> Start MixDeck when Windows starts</label>
+      ${W.info.platform === 'android' ? `<div class="set"><p>MixDeck keeps playing with the screen off and shows a notification while it's running. If Android asks to allow notifications, choose <b>Allow</b> so it can keep going in the background.</p></div>` : `<div class="set">
+        <label class="switch"><input type="checkbox" id="autostart" ${s.startWithWindows ? 'checked' : ''}> Start MixDeck when ${W.info.platform === 'linux' ? 'I log in' : 'Windows starts'}</label>
         <label class="switch"><input type="checkbox" id="closetray" ${s.closeToTray ? 'checked' : ''}> Keep playing in the system tray when I close the window</label>
-        <p>MixDeck's icon sits in the tray by the clock. Right-click it for play/pause, next, or to quit.</p>
-      </div>`;
+        <p>${W.info.platform === 'linux' ? 'Only use the tray option if your desktop shows tray icons (GNOME needs the AppIndicator extension).' : "MixDeck's icon sits in the tray by the clock. Right-click it for play/pause, next, or to quit."}</p>
+      </div>`}`;
     const xf = $('#xf');
     xf.oninput = () => { $('#xf-val').textContent = xf.value + 's'; };
     xf.onchange = () => saveSettings({ crossfade: Number(xf.value) });
     const ss = $('#spsafe'); if (ss) ss.onchange = () => saveSettings({ spotifySafe: ss.checked });
-    $('#autostart').onchange = e => saveSettings({ startWithWindows: e.target.checked }).catch(err => { toast(err.message, true); e.target.checked = !e.target.checked; });
-    $('#closetray').onchange = e => saveSettings({ closeToTray: e.target.checked });
+    if ($('#autostart')) $('#autostart').onchange = e => saveSettings({ startWithWindows: e.target.checked }).catch(err => { toast(err.message, true); e.target.checked = !e.target.checked; });
+    if ($('#closetray')) $('#closetray').onchange = e => saveSettings({ closeToTray: e.target.checked });
   },
 
   done(box) {
@@ -253,7 +254,7 @@ const VIEWS = {
         <h3>How to use it</h3>
         <p><b>Search</b> any service, or paste a Spotify, SoundCloud or YouTube link. Tap <b>＋</b> to add songs to the queue, or drag the dotted handle to reorder.</p>
         <p><b>Library</b> has your Spotify and SoundCloud likes and playlists. <b>Playlists</b> saves mixes that combine all three.</p>
-        <p>Music plays from this PC. Closing the window keeps the music going; MixDeck stays in the tray.</p>
+        <p>${W.info.platform === 'android' ? 'Music plays from this phone, even with the screen off.' : W.info.settings.closeToTray ? 'Music plays from this computer. Closing the window keeps the music going; MixDeck stays in the tray.' : 'Music plays from this computer while MixDeck is open.'}</p>
       </div>`;
   },
 };

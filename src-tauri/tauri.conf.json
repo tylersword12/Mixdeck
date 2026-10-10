@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "MixDeck",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "identifier": "app.mixdeck.desktop",
   "build": {
     "frontendDist": "splash"
@@ -15,7 +15,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": "all",
     "publisher": "MixDeck",
     "shortDescription": "One playlist across Spotify, SoundCloud and YouTube",
     "longDescription": "MixDeck plays one playlist across Spotify, SoundCloud and YouTube with crossfades, controlled from this PC or any phone on your Wi-Fi.",
@@ -27,11 +27,33 @@
       "icons/icon.ico"
     ],
     "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
       "nsis": {
         "installMode": "currentUser",
         "displayLanguageSelector": false
       }
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "gstreamer1.0-plugins-good",
+          "gstreamer1.0-plugins-bad",
+          "gstreamer1.0-libav"
+        ]
+      },
+      "rpm": {
+        "depends": [
+          "gstreamer1-plugins-good"
+        ]
+      },
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    },
+    "android": {
+      "minSdkVersion": 26
     }
   }
 }

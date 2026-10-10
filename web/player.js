@@ -34,7 +34,7 @@ let drmReported = false;
 function drmFailed(reason) {
   if (HOST !== 'app' || drmReported) return;
   drmReported = true;
-  log('Spotify needs browser DRM: moving the player to your browser (' + reason + ')', 'error');
+  log('Moving the player to your browser (' + reason + ')', 'error');
   api('/api/player/drm-failed', { method: 'POST', body: { reason } }).catch(() => {});
 }
 // Spotify SDK promises occasionally never settle (e.g. when its connection hiccups). Never
@@ -727,6 +727,12 @@ async function start() {
   masterGain = ctx.createGain();
   masterGain.connect(ctx.destination);
   scA = new ScDeck('A'); scB = new ScDeck('B');
+  // A built-in web view without AAC playback can't play SoundCloud/YouTube: use the browser.
+  if (HOST === 'app') {
+    const aac = 'audio/mp4; codecs="mp4a.40.2"';
+    const ok = (window.MediaSource && MediaSource.isTypeSupported(aac)) || new Audio().canPlayType(aac);
+    if (!ok) drmFailed('this window can\'t play AAC audio');
+  }
   sp = new SpotifyDeck();
   document.body.classList.add('started');
   connect();

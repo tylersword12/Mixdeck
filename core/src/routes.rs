@@ -163,7 +163,7 @@ async fn player_report(State(app): S, ConnectInfo(addr): Addr, Json(b): Json<Val
 /// The in-app player found that Spotify's DRM doesn't work there: move to the browser.
 async fn player_drm_failed(State(app): S, ConnectInfo(addr): Addr, Json(b): Json<Value>) -> ApiResult<Json<Value>> {
     require_local(&app, &addr)?;
-    crate::logf!("[player] Spotify DRM unavailable in the app window ({}); switching to the browser", s(&b["reason"]));
+    crate::logf!("[player] the in-app player can't play everything ({}); switching to the browser", s(&b["reason"]));
     let mode = app.config.lock().data.settings.player_host.clone();
     if mode != "auto" { return Ok(Json(json!({ "switched": false }))); }
     { let mut c = app.config.lock(); c.data.settings.player_host = "browser".into(); c.save(); }

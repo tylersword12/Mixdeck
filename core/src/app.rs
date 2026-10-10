@@ -23,10 +23,21 @@ pub trait Host: Send + Sync + 'static {
     fn restart_player(&self) {}
     fn set_autostart(&self, _on: bool) -> Result<(), String> { Err("Only available in the desktop app".into()) }
     fn show_main(&self) {}
+    /// "windows", "linux", "macos" or "android".
+    fn platform(&self) -> &'static str { std::env::consts::OS }
 }
 
 pub struct HeadlessHost;
-impl Host for HeadlessHost {}
+impl Host for HeadlessHost {
+    // For testing the app-only screens in a normal browser: MIXDECK_FAKE_APP=android|windows|linux
+    fn is_app(&self) -> bool { std::env::var("MIXDECK_FAKE_APP").is_ok() }
+    fn platform(&self) -> &'static str {
+        match std::env::var("MIXDECK_FAKE_APP").as_deref() {
+            Ok("android") => "android", Ok("windows") => "windows", Ok("linux") => "linux",
+            _ => std::env::consts::OS,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Options {
@@ -246,6 +257,7 @@ impl App {
             "port": self.port(),
             "version": self.opts.version,
             "app": self.host.is_app(),
+            "platform": self.host.platform(),
             "dataDir": self.data_dir().display().to_string(),
             "lanUrls": self.lan_urls(),
             "playerOnline": self.player_online(),

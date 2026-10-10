@@ -2,6 +2,7 @@
 // uses, no API key), but YouTube changes so often that yt-dlp — maintained daily — does
 // the extraction. MixDeck downloads yt-dlp itself, plus a JavaScript runtime that yt-dlp
 // needs for YouTube (Node.js 22+ if installed, otherwise Deno).
+#![cfg_attr(feature = "native-youtube", allow(unreachable_code, unused_imports, unused_variables))]
 use crate::app::App;
 use crate::util::{num, s, ApiError, ApiResult};
 use parking_lot::Mutex;
@@ -159,6 +160,8 @@ impl App {
     }
 
     pub async fn yt_search(&self, q: &str, offset: u64) -> ApiResult {
+        #[cfg(feature = "native-youtube")]
+        return self.ytn_search(q, offset).await;
         let n = offset + 20;
         let out = self.ytdlp_run(&["--flat-playlist".into(), "-J".into(), format!("ytsearch{n}:{q}")], 60, None).await?;
         let j: Value = serde_json::from_str(&out)?;
@@ -171,6 +174,8 @@ impl App {
     }
 
     pub async fn yt_resolve(&self, link: &str) -> ApiResult {
+        #[cfg(feature = "native-youtube")]
+        return self.ytn_resolve(link).await;
         match parse_url(link) {
             Some(YtLink::Video(id)) => {
                 let out = self.ytdlp_run(&["--flat-playlist".into(), "--no-playlist".into(), "-J".into(), format!("https://www.youtube.com/watch?v={id}")], 60, None).await?;
@@ -194,6 +199,9 @@ impl App {
     /// player can start on the file while it's still arriving. Prefers AAC (m4a).
     pub async fn yt_download(&self, id: &str, dir: &Path, tx: tokio::sync::watch::Sender<crate::cache::Progress>, on_progress: impl Fn(f64) + Send + Sync + 'static) -> ApiResult {
         if !valid_id(id) { return Err(ApiError::bad("bad video id")); }
+        #[cfg(feature = "native-youtube")]
+        return self.ytn_download(id, dir, tx, on_progress).await;
+        #[allow(unreachable_code)]
         let file: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let f2 = file.clone();
         let tx2 = tx.clone();
@@ -271,6 +279,9 @@ impl App {
     // ---- tools: install / update / status --------------------------------------
 
     pub async fn tools_status(&self) -> Value {
+        #[cfg(feature = "native-youtube")]
+        return json!({ "ytdlp": { "installed": true, "version": "built-in" }, "js": { "kind": "built-in", "path": "" }, "ready": true, "builtin": true, "install": self.tools.install.lock().clone() });
+        #[allow(unreachable_code)]
         let yt = self.ytdlp_path();
         let mut version = Value::Null;
         if let Some(p) = &yt {
@@ -317,6 +328,9 @@ impl App {
 
     /// Install whatever is missing (yt-dlp and, without Node 22+, Deno). Safe to call often.
     pub async fn tools_install(&self, force_update: bool) -> ApiResult<()> {
+        #[cfg(feature = "native-youtube")]
+        { let _ = force_update; return Ok(()); }
+        #[allow(unreachable_code)]
         let _g = self.tools.install_lock.lock().await;
         let r = self.tools_install_inner(force_update).await;
         match &r {
@@ -370,6 +384,9 @@ impl App {
     }
 
     pub async fn tools_update(&self) -> ApiResult {
+        #[cfg(feature = "native-youtube")]
+        return Ok(json!({ "output": "YouTube support is built into this version; update MixDeck to update it." }));
+        #[allow(unreachable_code)]
         if self.opts.ytdlp_path.is_some() { return Ok(json!({ "output": "Using a custom yt-dlp (YTDLP_PATH); update it yourself." })); }
         if self.ytdlp_path().is_none() { self.tools_install(false).await?; return Ok(json!({ "output": "Installed" })); }
         // yt-dlp's own updater; fall back to re-downloading the release.

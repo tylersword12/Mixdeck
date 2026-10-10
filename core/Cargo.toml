@@ -12,7 +12,12 @@ path = "src/lib.rs"
 name = "mixdeck-server"
 path = "src/main.rs"
 
+[features]
+# Built-in YouTube client (a Rust take on NewPipe) for platforms without yt-dlp (Android).
+native-youtube = ["dep:rustypipe"]
+
 [dependencies]
+rustypipe = { version = "0.11", optional = true, default-features = false, features = ["rustls-tls-webpki-roots"] }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["macros"] }
 tower-http = { version = "0.6", features = ["fs"] }

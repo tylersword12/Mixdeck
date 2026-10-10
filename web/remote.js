@@ -522,21 +522,25 @@ async function renderSettings() {
     <select id="player-host" ${hostOnly}>
       <option value="auto" ${s.playerHost === 'auto' ? 'selected' : ''}>Automatic: inside MixDeck, browser if Spotify needs it</option>
       <option value="app" ${s.playerHost === 'app' ? 'selected' : ''}>Always inside MixDeck</option>
-      <option value="browser" ${s.playerHost === 'browser' ? 'selected' : ''}>Always in ${esc(info.defaultBrowser || 'my default browser')}</option>
+      <option value="browser" ${s.playerHost === 'browser' ? 'selected' : ''}>Always in ${esc(info.defaultBrowser || (info.platform === 'android' ? 'Chrome' : 'my default browser'))}</option>
     </select>
-    <p>Spotify's player needs browser DRM, which doesn't always work inside the MixDeck window. In Automatic mode, MixDeck moves the player to ${esc(info.defaultBrowser || 'your default browser')} the first time that happens. It opens as a separate small window with its own profile, so your normal browsing isn't affected.</p>
+    <p>${info.platform === 'android'
+      ? "Spotify's player needs DRM, which doesn't always work inside apps. In Automatic mode, if Spotify can't play inside MixDeck, the player moves to Chrome. Keep that Chrome tab open while you listen."
+      : `Spotify's player needs browser DRM, which doesn't always work inside the MixDeck window. In Automatic mode, MixDeck moves the player to ${esc(info.defaultBrowser || 'your default browser')} the first time that happens. It opens as a separate small window with its own profile, so your normal browsing isn't affected.`}</p>
     <div class="row-actions"><button class="ghost" id="player-restart" ${hostOnly}>Restart player</button></div>
     <div id="join-qr" class="join" style="margin-top:10px"></div>
   </div>
 
   <div class="set">
     <h3>MixDeck app</h3>
-    <label class="switch"><input type="checkbox" id="autostart" ${s.startWithWindows ? 'checked' : ''} ${hostOnly}> Start MixDeck when Windows starts</label>
+    ${info.platform === 'android' ? `<p>Music keeps playing with the screen off. MixDeck shows a notification while it's running; swipe MixDeck away from your recent apps to stop it completely.</p>` : `
+    <label class="switch"><input type="checkbox" id="autostart" ${s.startWithWindows ? 'checked' : ''} ${hostOnly}> Start MixDeck when ${info.platform === 'linux' ? 'I log in' : 'Windows starts'}</label>
     <label class="switch"><input type="checkbox" id="closetray" ${s.closeToTray ? 'checked' : ''} ${hostOnly}> Keep playing in the tray when I close the window</label>
+    ${info.platform === 'linux' ? '<p>Some Linux desktops (like GNOME) hide tray icons unless you add an AppIndicator extension. Only turn on the tray option if you can see MixDeck\'s icon.</p>' : ''}`}
     <p>Your settings, playlists and downloads are in <code>${esc(info.dataDir)}</code>. Version ${esc(info.version)}.</p>
     <div class="row-actions">
       <button class="ghost" id="rerun-setup" ${hostOnly}>Run setup again</button>
-      <button class="ghost" id="import-old" ${hostOnly}>Import from the old MixDeck folder</button>
+      ${info.platform === 'android' ? '' : `<button class="ghost" id="import-old" ${hostOnly}>Import from the old MixDeck folder</button>`}
       <button class="ghost" id="show-log">View log</button>
     </div>
   </div>
@@ -554,7 +558,7 @@ async function renderSettings() {
     <input type="range" id="xf" min="0" max="15" step="0.5" value="${s.crossfade}" style="width:100%">
     <label class="switch"><input type="checkbox" id="spsafe" ${s.spotifySafe ? 'checked' : ''}> Spotify-safe transitions</label>
     <p>Spotify's Developer Policy doesn't allow Spotify tracks to overlap other audio. When this is on, transitions that involve a Spotify track don't overlap; SoundCloud-to-SoundCloud transitions still crossfade.</p>
-    <label>Preload this many SoundCloud tracks ahead</label>
+    <label>Download this many upcoming SoundCloud/YouTube songs ahead</label>
     <input type="number" id="ahead" min="1" max="5" value="${s.preloadAhead || 2}" style="max-width:100px">
   </div>
 
@@ -593,7 +597,7 @@ async function renderSettings() {
 
   <div class="set">
     <h3>YouTube</h3>
-    <p>Search YouTube or paste a video or playlist link. Audio is fetched with <b>yt-dlp</b>, which MixDeck downloads the first time you use YouTube and keeps in the data folder.</p>
+    <p>Search YouTube or paste a video or playlist link.${info.platform === 'android' ? '' : ' Audio is fetched with <b>yt-dlp</b>, which MixDeck downloads the first time you use YouTube and keeps in the data folder.'}</p>
     <p id="yt-status" class="muted small">Checking…</p>
     <div class="row-actions"><button class="ghost" id="yt-update" ${hostOnly}>Update yt-dlp</button></div>
     <p class="small">If YouTube songs stop loading, update yt-dlp first. YouTube changes often, and yt-dlp releases fixes within days.</p>
@@ -601,7 +605,7 @@ async function renderSettings() {
 
   <div class="set">
     <h3>Download cache</h3>
-    <p>SoundCloud tracks are downloaded ahead of time so crossfades are seamless. Using <b id="cache-size">…</b>.</p>
+    <p>SoundCloud and YouTube songs are saved as they play and download ahead of time, so crossfades are seamless and replays are instant. Using <b id="cache-size">…</b>.</p>
     <label>Maximum size (MB)</label>
     <div class="inline"><input type="number" id="cache-mb" min="100" step="100" value="${s.cacheMB}" style="max-width:140px"><button class="ghost" id="cache-mb-save">Save</button><button class="ghost danger" id="cache-clear">Clear cache</button></div>
   </div>`;
@@ -609,8 +613,13 @@ async function renderSettings() {
   api('/api/cache').then(c => { $('#cache-size').textContent = (c.bytes / 1048576).toFixed(0) + ' MB'; }).catch(() => {});
   api('/api/youtube/status').then(y => {
     const el = $('#yt-status'); if (!el) return;
-    el.innerHTML = (y.installed ? `<span class="pill ok">yt-dlp ${esc(y.version || '')}</span>` : '<span class="pill wait">yt-dlp will download on first use</span>') +
-      (y.nodeOk ? '' : ` <span class="pill bad">Node.js ${esc(y.node)} is too old for YouTube; install Node 22 or newer</span>`);
+    if (y.builtin) {
+      el.innerHTML = '<span class="pill ok">Built in</span> YouTube support is part of this version of MixDeck.';
+      const b = $('#yt-update'); if (b) b.style.display = 'none';
+      return;
+    }
+    el.innerHTML = (y.ytdlp && y.ytdlp.installed ? `<span class="pill ok">yt-dlp ${esc(y.ytdlp.version || '')}</span>` : '<span class="pill wait">yt-dlp will download on first use</span>') +
+      (y.js ? ` <span class="pill ok">${y.js.kind === 'node' ? 'Node.js' : 'Deno'}</span>` : ' <span class="pill wait">a JavaScript runtime (Deno) will download on first use</span>');
   }).catch(e => { const el = $('#yt-status'); if (el) el.textContent = e.message; });
   const url = info.lanUrls[0];
   if (url && window.qrcode) {
@@ -705,8 +714,31 @@ function renderHost() {
   fitQueueColumn();
 }
 
+// ---------------------------------------------------------------------------
+// Android: this page hosts the audio engine itself in a hidden frame (on desktop the app
+// keeps a separate hidden window for it).
+// ---------------------------------------------------------------------------
+function wantsEmbeddedPlayer() {
+  const i = R.info;
+  return !!(i && i.app && i.platform === 'android' && IS_HOST && i.settings.playerHost !== 'browser');
+}
+function syncEmbeddedPlayer(reload = false) {
+  let f = document.getElementById('embedded-player');
+  if (!wantsEmbeddedPlayer()) { if (f) f.remove(); return; }
+  if (f && !reload) return;
+  if (f) f.remove();
+  f = document.createElement('iframe');
+  f.id = 'embedded-player';
+  f.src = '/player?auto=1&host=app';
+  f.allow = 'autoplay; encrypted-media';
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:fixed;width:1px;height:1px;left:-10px;top:-10px;border:0;opacity:0;pointer-events:none';
+  document.body.appendChild(f);
+}
+
 function connect() {
   const es = new EventSource('/api/events');
+  es.addEventListener('player-restart', () => syncEmbeddedPlayer(true));
   es.addEventListener('state', e => {
     const st = JSON.parse(e.data);
     st.status._rx = Date.now();
@@ -722,7 +754,7 @@ function connect() {
     if (structural) { renderNowPlaying(); renderQueue(); }
     renderHost();
   });
-  es.addEventListener('info', e => { R.info = JSON.parse(e.data); if (R.view === 'settings') renderSettings(); });
+  es.addEventListener('info', e => { R.info = JSON.parse(e.data); syncEmbeddedPlayer(); if (R.view === 'settings') renderSettings(); });
   es.onopen = () => { R.connected = true; renderHost(); };
   es.onerror = () => { R.connected = false; const el = $('#hoststatus'); el.className = 'pill bad'; el.textContent = 'Server unreachable'; };
 }
@@ -754,7 +786,7 @@ $('#q-clear').onclick = () => { if (confirm('Clear the queue? The current track 
 window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (v && v !== R.view) show(v); });
 window.addEventListener('resize', () => { if (R.view === 'queue' && WIDE()) show('search'); });
 
-api('/api/info').then(i => { R.info = i; renderHost(); }).catch(() => {});
+api('/api/info').then(i => { R.info = i; renderHost(); syncEmbeddedPlayer(); }).catch(() => {});
 connect();
 setInterval(tickProgress, 500);
 show(location.hash.slice(1) || (WIDE() ? 'search' : 'queue'));

@@ -11,6 +11,8 @@ pub mod spotify;
 pub mod store;
 pub mod util;
 pub mod youtube;
+#[cfg(feature = "native-youtube")]
+pub mod ytnative;
 
 pub use app::{App, HeadlessHost, Host, Options};
 use std::net::SocketAddr;
@@ -39,13 +41,23 @@ pub async fn start(opts: Options, host: Arc<dyn Host>) -> anyhow::Result<Arc<App
     Ok(app)
 }
 
-/// Where MixDeck keeps its data: %APPDATA%\MixDeck on Windows.
+/// Where MixDeck keeps its data: %APPDATA%\\MixDeck on Windows, ~/.local/share/mixdeck on
+/// Linux (an existing ~/.mixdeck is kept), ~/Library/Application Support/MixDeck on macOS.
+/// The Android app passes its own private folder instead.
 pub fn default_data_dir() -> std::path::PathBuf {
+    use std::path::PathBuf;
     if let Ok(d) = std::env::var("MIXDECK_DATA") { return d.into(); }
     #[cfg(windows)]
-    if let Ok(a) = std::env::var("APPDATA") { return std::path::PathBuf::from(a).join("MixDeck"); }
-    if let Ok(h) = std::env::var("HOME") { return std::path::PathBuf::from(h).join(".mixdeck"); }
-    std::path::PathBuf::from("mixdeck-data")
+    if let Ok(a) = std::env::var("APPDATA") { return PathBuf::from(a).join("MixDeck"); }
+    if let Ok(h) = std::env::var("HOME") {
+        let home = PathBuf::from(h);
+        if cfg!(target_os = "macos") { return home.join("Library/Application Support/MixDeck"); }
+        let legacy = home.join(".mixdeck");
+        if legacy.exists() { return legacy; }
+        let base = std::env::var("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|_| home.join(".local/share"));
+        return base.join("mixdeck");
+    }
+    PathBuf::from("mixdeck-data")
 }
 
 /// Open a link in the user's default browser.
