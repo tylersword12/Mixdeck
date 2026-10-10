@@ -45,6 +45,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/auth/spotify/callback", get(spotify_callback))
         .route("/api/spotify/logout", post(spotify_logout))
         .route("/api/spotify/token", get(spotify_token))
+        .route("/api/accounts/switch", post(account_switch))
+        .route("/api/accounts/remove", post(account_remove))
         .route("/api/search", get(search))
         .route("/api/resolve", post(resolve))
         .route("/api/library/spotify/playlists", get(|State(app): S| async move { app.spotify_playlists().await.map(Json) }))
@@ -227,6 +229,19 @@ async fn spotify_token(State(app): S, ConnectInfo(addr): Addr) -> ApiResult<Json
     require_local(&app, &addr)?;
     let (token, exp) = app.spotify_access_token().await?;
     Ok(Json(json!({ "token": token, "expiresAt": exp })))
+}
+
+async fn account_switch(State(app): S, Json(b): Json<Value>) -> ApiResult<Json<Value>> {
+    app.account_switch(&s(&b["service"]), &s(&b["id"]))?;
+    app.broadcast_info();
+    Ok(Json(app.info()))
+}
+
+async fn account_remove(State(app): S, ConnectInfo(addr): Addr, Json(b): Json<Value>) -> ApiResult<Json<Value>> {
+    require_local(&app, &addr)?;
+    app.account_remove(&s(&b["service"]), &s(&b["id"]))?;
+    app.broadcast_info();
+    Ok(Json(app.info()))
 }
 
 fn html_escape(s: &str) -> String { s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;") }
@@ -512,11 +527,21 @@ async fn settings(State(app): S, ConnectInfo(addr): Addr, Json(b): Json<Value>) 
         } else { false };
         if has("spotifyClientId") {
             let id = s(&b["spotifyClientId"]).trim().to_string();
-            if id != c.spotify.client_id { c.spotify.client_id = id; c.spotify.tokens = None; c.spotify.user = None; }
+            // Logins belong to a Client ID, so a new one means logging in again.
+            if id != c.spotify.client_id { c.spotify.client_id = id; c.spotify.tokens = None; c.spotify.user = None; c.spotify.others.clear(); }
         }
         if let Some(p) = profile {
             match p {
                 None => { c.soundcloud.username.clear(); c.soundcloud.profile = None; }
+                Some(p) if truthy(&b["scAddAccount"]) => {
+                    // Link another account: keep the current one in the list and make the new one active.
+                    let new = crate::store::ScAccount { username: s(&p["permalink"]), profile: Some(p), oauth_token: String::new() };
+                    let sc = &mut c.soundcloud;
+                    let cur = sc.active();
+                    sc.others.retain(|a| a.id() != new.id());
+                    if !cur.is_empty() && cur.id() != new.id() { sc.others.insert(0, cur); }
+                    sc.set_active(new);
+                }
                 Some(p) => { c.soundcloud.username = s(&p["permalink"]); c.soundcloud.profile = Some(p); }
             }
         }

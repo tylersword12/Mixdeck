@@ -183,6 +183,8 @@ class SpotifyDeck {
   async init() {
     const tok = await api('/api/spotify/token').catch(() => null);
     if (!tok) { this.error = 'Not logged in to Spotify'; return; }
+    // Remember whose account this is, to notice a switch to another linked account.
+    api('/api/info').then(i => { if (S.spUser === undefined) S.spUser = i.spotify && i.spotify.user ? i.spotify.user.id : null; }).catch(() => {});
     this.initializing = true;
     if (!(await widevineAvailable())) {
       this.error = 'This window can\'t play Spotify (no DRM support)';
@@ -217,6 +219,28 @@ class SpotifyDeck {
       const st = await within(this.player.getCurrentState(), 2000);
       if (st) { this.state = st; this.stateAt = performance.now(); }
     }, 400);
+  }
+
+  // Disconnect and connect again: the SDK asks for a fresh token, which now belongs to the
+  // newly active account. A Spotify song that was playing restarts on the new account.
+  async switchAccount() {
+    const wasPlaying = engine.cur && engine.cur.deck === this ? engine.cur.track : null;
+    const pos = wasPlaying ? this.position : 0;
+    this.ready = false; this.deviceId = null; this.state = null;
+    try { await within(this.player.disconnect(), 3000); } catch {}
+    const ok = await new Promise(res => {
+      const t = setTimeout(() => res(false), 15000);
+      const on = () => { clearTimeout(t); this.player.removeListener('ready', on); res(true); };
+      this.player.addListener('ready', on);
+      this.player.connect();
+    });
+    if (!ok) throw new Error('could not reconnect after switching accounts');
+    if (wasPlaying) {
+      engine.run(async () => {
+        await this.start(wasPlaying, this.level);
+        if (pos > 2000) await this.webApi(`/me/player/seek?position_ms=${Math.round(pos)}&device_id=${this.deviceId}`, { method: 'PUT' }).catch(() => {});
+      });
+    }
   }
 
   async webApi(path, opts = {}) {
@@ -640,6 +664,13 @@ function connect() {
   });
   es.addEventListener('info', e => {
     const info = JSON.parse(e.data);
+    // Switched to another linked Spotify account: reconnect the Spotify player as that account.
+    const spUser = info.spotify && info.spotify.loggedIn && info.spotify.user ? info.spotify.user.id : null;
+    if (S.spUser !== undefined && spUser && S.spUser && spUser !== S.spUser && sp && sp.player) {
+      log('Switched Spotify account to ' + info.spotify.user.name);
+      sp.switchAccount().catch(err => log('Spotify: ' + err.message, 'error'));
+    }
+    S.spUser = spUser;
     // Logged in to Spotify after the player started: bring the Spotify deck up.
     if (info.spotify && info.spotify.loggedIn && sp && !sp.player && !sp.initializing) {
       if (!engine.cur) location.reload();

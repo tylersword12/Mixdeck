@@ -173,6 +173,42 @@ pub struct SpotifyConf {
     pub tokens: Option<Tokens>,
     #[serde(default)]
     pub user: Option<SpotifyUser>,
+    /// Other linked accounts (the active one lives in `tokens`/`user`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub others: Vec<SpotifyAccount>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SpotifyAccount {
+    pub user: SpotifyUser,
+    pub tokens: Tokens,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ScAccount {
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub profile: Option<Value>,
+    #[serde(default)]
+    pub oauth_token: String,
+}
+
+impl ScAccount {
+    pub fn id(&self) -> String {
+        match self.profile.as_ref().map(|p| &p["id"]) {
+            Some(Value::Number(n)) => n.to_string(),
+            Some(Value::String(s)) if !s.is_empty() => s.clone(),
+            _ => self.username.clone(),
+        }
+    }
+    pub fn name(&self) -> String {
+        let p = self.profile.as_ref();
+        let n = p.and_then(|p| p["username"].as_str()).or_else(|| p.and_then(|p| p["permalink"].as_str())).unwrap_or(&self.username);
+        if n.is_empty() { "SoundCloud account".into() } else { n.to_string() }
+    }
+    pub fn is_empty(&self) -> bool { self.username.is_empty() && self.profile.is_none() && self.oauth_token.is_empty() }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -190,6 +226,18 @@ pub struct ScConf {
     pub username: String,
     #[serde(default)]
     pub profile: Option<Value>,
+    /// Other linked accounts (the active one lives in the fields above).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub others: Vec<ScAccount>,
+}
+
+impl ScConf {
+    pub fn active(&self) -> ScAccount {
+        ScAccount { username: self.username.clone(), profile: self.profile.clone(), oauth_token: self.oauth_token.clone() }
+    }
+    pub fn set_active(&mut self, a: ScAccount) {
+        self.username = a.username; self.profile = a.profile; self.oauth_token = a.oauth_token;
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]

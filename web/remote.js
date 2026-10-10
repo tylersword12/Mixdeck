@@ -134,7 +134,7 @@ function renderNowPlaying() {
   const np = $('#np');
   if (!t) {
     np.innerHTML = `<div class="np"><div class="muted">${R.state.queue.length ? 'Tap a track in the queue to start.' : 'Your queue is empty. Search or open your library to add music.'}</div>
-      ${R.state.queue.length ? '<div class="ctl"><button class="round primary" id="np-play" title="Play">${ICON.play}</button></div>' : ''}</div>`;
+      ${R.state.queue.length ? `<div class="ctl"><button class="round primary" id="np-play" title="Play">${ICON.play}</button></div>` : ''}</div>`;
   } else {
     const trans = st.transition ? `<div class="pill wait small">Crossfading…</div>` : st.message ? `<div class="pill wait small">${esc(st.message)}</div>` : '';
     np.innerHTML = `<div class="np"><div class="np-top">${art(t.artwork)}<div style="min-width:0;flex:1">
@@ -427,6 +427,7 @@ function showTrackCollection(box, name, tracks, extraActions = [], menuFor = bro
 // ---- Library ---------------------------------------------------------------
 async function renderLibrary() {
   const box = $('#library');
+  renderLibAccount();
   const top = R.libStack[R.libStack.length - 1];
   const back = R.libStack.length ? `<button class="back" id="lib-back">‹ Back</button>` : '';
   if (top) {
@@ -562,6 +563,48 @@ async function pickSavedPlaylist(tracks) {
 }
 
 // ---- Settings ----------------------------------------------------------------
+// ---- Linked accounts ------------------------------------------------------------
+function accountsOf(service) { return (R.info && R.info[service] && R.info[service].accounts) || []; }
+function activeAccountKey() { return ['spotify', 'soundcloud'].map(s => (accountsOf(s).find(a => a.active) || {}).id || '').join('|'); }
+async function switchAccount(service, id) {
+  try {
+    R.info = await api('/api/accounts/switch', { method: 'POST', body: { service, id } });
+    R.acctKey = activeAccountKey();
+    R.libStack = [];
+    const a = accountsOf(service).find(x => x.active);
+    toast('Switched to ' + (a ? a.name : 'account'));
+  } catch (e) { toast(e.message, true); }
+}
+function accountList(service) {
+  const list = accountsOf(service);
+  if (!list.length) return '';
+  const many = list.length > 1;
+  return `<div class="acct-list">${list.map(a => `<div class="acct ${a.active ? 'on' : ''}">
+      <div class="av" ${a.avatar ? `style="background-image:url('${esc(a.avatar)}')"` : ''}>${a.avatar ? '' : esc((a.name || '?').slice(0, 1).toUpperCase())}</div>
+      <div class="n">${esc(a.name)}${a.hasToken ? ' <span class="pill ok small">private</span>' : ''}</div>
+      ${a.active ? (many ? '<span class="pill ok small">Active</span>' : '') : `<button class="ghost" data-acct-switch="${service}" data-id="${esc(a.id)}">Switch</button>`}
+      <button class="ghost danger" data-acct-remove="${service}" data-id="${esc(a.id)}" ${IS_HOST ? '' : 'disabled'} title="Unlink this account">Remove</button>
+    </div>`).join('')}</div>`;
+}
+function bindAccountButtons(root, rerender) {
+  root.querySelectorAll('[data-acct-switch]').forEach(b => b.onclick = async () => { await switchAccount(b.dataset.acctSwitch, b.dataset.id); rerender(); });
+  root.querySelectorAll('[data-acct-remove]').forEach(b => b.onclick = async () => {
+    const a = accountsOf(b.dataset.acctRemove).find(x => x.id === b.dataset.id);
+    if (!confirm(`Unlink ${a ? a.name : 'this account'} from MixDeck?`)) return;
+    try { R.info = await api('/api/accounts/remove', { method: 'POST', body: { service: b.dataset.acctRemove, id: b.dataset.id } }); R.acctKey = activeAccountKey(); R.libStack = []; toast('Removed'); } catch (e) { toast(e.message, true); }
+    rerender();
+  });
+}
+
+// Account picker above the library when a service has more than one linked account.
+function renderLibAccount() {
+  const el = $('#lib-acct');
+  const list = accountsOf(R.libSrc);
+  if (list.length < 2 || R.libStack.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `Account <select id="lib-acct-sel">${list.map(a => `<option value="${esc(a.id)}" ${a.active ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>`;
+  $('#lib-acct-sel').onchange = async e => { await switchAccount(R.libSrc, e.target.value); renderLibrary(); };
+}
+
 async function renderSettings() {
   const info = R.info = await api('/api/info');
   const s = info.settings;
@@ -621,28 +664,30 @@ async function renderSettings() {
   <div class="set">
     <h3>Spotify</h3>
     <p>${sp.loggedIn ? `<span class="pill ok">Logged in${sp.user ? ' as ' + esc(sp.user.name) : ''}</span>` : '<span class="pill bad">Not connected</span>'}</p>
+    ${accountList('spotify')}
     ${hostNote}
     <label>Client ID (from developer.spotify.com/dashboard)</label>
     <div class="inline"><input type="text" id="sp-cid" value="${esc(sp.clientId)}" placeholder="32-character Client ID" ${hostOnly}><button class="ghost" id="sp-cid-save" ${hostOnly}>Save</button></div>
     <p>Redirect URI to add in your Spotify app: <code>${esc(sp.redirectUri)}</code></p>
     <div class="row-actions">
-      ${sp.loggedIn ? `<button class="ghost" id="sp-logout" ${hostOnly}>Log out</button>` : `<button class="primary" id="sp-login" ${IS_HOST && sp.clientId ? '' : 'disabled'}>Log in with Spotify</button>`}
+      ${sp.loggedIn ? `<button class="ghost" id="sp-login" ${IS_HOST && sp.clientId ? '' : 'disabled'}>Add another account</button>` : `<button class="primary" id="sp-login" ${IS_HOST && sp.clientId ? '' : 'disabled'}>Log in with Spotify</button>`}
     </div>
-    <p class="small">Needs Spotify Premium. In the dashboard, tick "Web API" and "Web Playback SDK", and add your Spotify email under User Management.</p>
+    <p class="small">Needs Spotify Premium. In the dashboard, tick "Web API" and "Web Playback SDK", and add your Spotify email under User Management.${sp.loggedIn ? ' To add another account, add its email under User Management too (each needs Premium), then use Add another account and choose "Not you?" on Spotify\'s page to log in as them.' : ''}</p>
   </div>
 
   <div class="set">
     <h3>SoundCloud</h3>
-    <label>Your SoundCloud profile link</label>
-    <div class="inline"><input type="text" id="sc-user" value="${esc(scs.profile ? scs.profile.url : scs.username)}" placeholder="https://soundcloud.com/yourname" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="ghost" id="sc-user-save">Save</button></div>
+    ${accountsOf('soundcloud').length > 1 ? accountList('soundcloud') : ''}
+    <label>${accountsOf('soundcloud').length ? 'Add another SoundCloud account (profile link)' : 'Your SoundCloud profile link'}</label>
+    <div class="inline"><input type="text" id="sc-user" value="${accountsOf('soundcloud').length ? '' : esc(scs.profile ? scs.profile.url : scs.username)}" placeholder="https://soundcloud.com/yourname" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="ghost" id="sc-user-save">${accountsOf('soundcloud').length ? 'Add' : 'Save'}</button></div>
     <div id="sc-user-msg"></div>
-    ${scs.profile ? `<div class="pl" style="cursor:default;margin-top:8px">${art(scs.profile.avatar)}<div class="m"><div class="t">${esc(scs.profile.username)}</div>
+    ${scs.profile && accountsOf('soundcloud').length < 2 ? `<div class="pl" style="cursor:default;margin-top:8px">${art(scs.profile.avatar)}<div class="m"><div class="t">${esc(scs.profile.username)}</div>
       <div class="muted small">soundcloud.com/${esc(scs.profile.permalink)}${scs.profile.likes != null ? ` · ${scs.profile.likes} likes` : ''}${scs.profile.playlists != null ? ` · ${scs.profile.playlists} playlists` : ''}</div></div>
       <button class="ghost" id="sc-user-clear">Remove</button></div>` : ''}
     <p>On soundcloud.com, open your profile and copy the address bar. In the SoundCloud app, go to your profile, tap Share → Copy link. A username works too. Search and links work without this. Only public likes and playlists show up unless you add the token below.</p>
     <details ${hostOnly ? '' : ''}><summary class="muted small" style="cursor:pointer;margin-top:10px">Advanced: private likes, client ID</summary>
       ${hostNote}
-      <label>OAuth token (optional, shows private likes/playlists) ${scs.hasToken ? '<span class="pill ok">set</span>' : ''}</label>
+      <label>OAuth token (optional, shows private likes/playlists${accountsOf('soundcloud').length > 1 ? ' for the active account' : ''}) ${scs.hasToken ? '<span class="pill ok">set</span>' : ''}</label>
       <div class="inline"><input type="password" id="sc-token" placeholder="${scs.hasToken ? '•••••• (saved)' : 'value of the oauth_token cookie'}" ${hostOnly}><button class="ghost" id="sc-token-save" ${hostOnly}>Save</button></div>
       <p>Log in at soundcloud.com in your browser, open DevTools → Application → Cookies → soundcloud.com and copy <code>oauth_token</code>. It stays on this computer. Leave blank to remove.</p>
       <label>client_id override (normally found automatically)</label>
@@ -698,14 +743,16 @@ async function renderSettings() {
   const rs = $('#rerun-setup'); if (rs) rs.onclick = () => { location.href = '/setup'; };
   const io = $('#import-old'); if (io) io.onclick = importOld;
   const sl = $('#show-log'); if (sl) sl.onclick = showLog;
-  const lo = $('#sp-logout'); if (lo) lo.onclick = async () => { await api('/api/spotify/logout', { method: 'POST' }); renderSettings(); };
+  bindAccountButtons(box, renderSettings);
   const saveProfile = async value => {
     const btn = $('#sc-user-save'), msg = $('#sc-user-msg');
     btn.disabled = true; msg.innerHTML = value ? '<p>Looking up profile…</p>' : '';
     try {
-      R.info = await api('/api/settings', { method: 'POST', body: { scProfile: value } });
+      const adding = !!value && accountsOf('soundcloud').length > 0;
+      R.info = await api('/api/settings', { method: 'POST', body: { scProfile: value, scAddAccount: adding } });
+      R.acctKey = activeAccountKey();
       R.libStack = [];
-      toast(value ? 'Found ' + R.info.soundcloud.profile.username : 'Removed');
+      toast(value ? (adding ? 'Added ' : 'Found ') + R.info.soundcloud.profile.username : 'Removed');
       renderSettings();
     } catch (e) {
       msg.innerHTML = `<p class="pill bad" style="display:block;border-radius:8px">${esc(e.message)}</p>`;
@@ -714,7 +761,11 @@ async function renderSettings() {
   };
   $('#sc-user-save').onclick = () => saveProfile($('#sc-user').value.trim());
   $('#sc-user').addEventListener('keydown', e => { if (e.key === 'Enter') saveProfile($('#sc-user').value.trim()); });
-  const clr = $('#sc-user-clear'); if (clr) clr.onclick = () => saveProfile('');
+  const clr = $('#sc-user-clear'); if (clr) clr.onclick = async () => {
+    const a = accountsOf('soundcloud').find(x => x.active);
+    try { R.info = await api('/api/accounts/remove', { method: 'POST', body: { service: 'soundcloud', id: a ? a.id : '' } }); R.acctKey = activeAccountKey(); R.libStack = []; toast('Removed'); } catch (e) { toast(e.message, true); }
+    renderSettings();
+  };
   $('#sc-token-save').onclick = async () => { await save({ scOauthToken: $('#sc-token').value }); renderSettings(); };
   $('#sc-cid-save').onclick = async () => { await save({ scClientId: $('#sc-cid').value }); renderSettings(); };
   $('#sc-refresh').onclick = async () => { try { const r = await api('/api/soundcloud/refresh', { method: 'POST' }); toast('Found client_id ' + r.clientId); } catch (e) { toast(e.message, true); } };
@@ -812,7 +863,15 @@ function connect() {
     if (structural) { renderNowPlaying(); renderQueue(); }
     renderHost();
   });
-  es.addEventListener('info', e => { R.info = JSON.parse(e.data); syncEmbeddedPlayer(); if (R.view === 'settings') renderSettings(); });
+  es.addEventListener('info', e => {
+    R.info = JSON.parse(e.data);
+    syncEmbeddedPlayer();
+    // Account switched (here or from another device): the library belongs to the old one.
+    const key = activeAccountKey();
+    if (R.acctKey !== undefined && key !== R.acctKey) { R.libStack = []; if (R.view === 'library') renderLibrary(); }
+    R.acctKey = key;
+    if (R.view === 'settings') renderSettings();
+  });
   es.onopen = () => { R.connected = true; renderHost(); };
   es.onerror = () => { R.connected = false; const el = $('#hoststatus'); el.className = 'pill bad'; el.textContent = 'Server unreachable'; };
 }
@@ -844,7 +903,7 @@ $('#q-clear').onclick = () => { if (confirm('Clear the queue? The current track 
 window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (v && v !== R.view) show(v); });
 window.addEventListener('resize', () => { if ((R.view === 'queue' && WIDE()) || (R.view === 'nowplaying' && !WIDE())) show(R.view); });
 
-api('/api/info').then(i => { R.info = i; renderHost(); syncEmbeddedPlayer(); }).catch(() => {});
+api('/api/info').then(i => { R.info = i; R.acctKey = activeAccountKey(); renderHost(); syncEmbeddedPlayer(); if (R.view === 'library') renderLibAccount(); }).catch(() => {});
 connect();
 setInterval(tickProgress, 500);
 show(location.hash.slice(1) || (WIDE() ? 'search' : 'queue'));

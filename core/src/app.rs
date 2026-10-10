@@ -253,6 +253,7 @@ impl App {
     pub fn info(&self) -> Value {
         let cfg = self.config.lock();
         let c = &cfg.data;
+        let (sp_accounts, sc_accounts) = App::accounts_json(c);
         json!({
             "port": self.port(),
             "version": self.opts.version,
@@ -267,6 +268,7 @@ impl App {
                 "loggedIn": c.spotify.tokens.as_ref().map(|t| !t.refresh_token.is_empty()).unwrap_or(false),
                 "user": c.spotify.user,
                 "redirectUri": self.spotify_redirect_uri(),
+                "accounts": sp_accounts,
             },
             "soundcloud": {
                 "username": c.soundcloud.username,
@@ -274,6 +276,7 @@ impl App {
                 "hasToken": !c.soundcloud.oauth_token.is_empty(),
                 "manualClientId": c.soundcloud.manual_client_id,
                 "clientIdFound": !c.soundcloud.client_id.is_empty(),
+                "accounts": sc_accounts,
             },
             "settings": c.settings,
         })

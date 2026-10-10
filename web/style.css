@@ -139,6 +139,15 @@ h3 { font-size: 15px; margin: 18px 0 8px; }
 .pl .m { min-width: 0; flex: 1; }
 .pl .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pl.dim { opacity: .5; }
+.acct-list { margin: 6px 0 10px; }
+.acct { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 6px; background: var(--panel2); }
+.acct.on { border-color: var(--accent); }
+.acct .av { width: 32px; height: 32px; border-radius: 50%; background: var(--panel) center/cover; flex: none; display: grid; place-items: center; font-weight: 700; font-size: 14px; color: var(--muted); }
+.acct .n { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct button { padding: 5px 12px; font-size: 13px; }
+#lib-acct:empty { display: none; }
+#lib-acct { display: flex; align-items: center; gap: 8px; margin: -2px 0 12px; color: var(--muted); font-size: 13px; }
+#lib-acct select { width: auto; max-width: 100%; padding: 6px 10px; }
 .back { border: 0; background: transparent; color: var(--accent); padding: 4px 0; margin-bottom: 6px; }
 .empty-note { color: var(--muted); padding: 24px 4px; text-align: center; }
 .spinner { color: var(--muted); padding: 18px 4px; }

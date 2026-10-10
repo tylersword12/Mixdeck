@@ -1,6 +1,7 @@
 //! MixDeck core: the local server that powers the desktop app, the phone remote and the
 //! audio player page. The desktop shell (src-tauri) embeds this; `mixdeck-server` runs it
 //! headless for development.
+pub mod accounts;
 pub mod app;
 pub mod browser;
 pub mod cache;

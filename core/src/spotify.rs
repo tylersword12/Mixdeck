@@ -29,7 +29,8 @@ impl App {
         let state = b64url(&st);
         self.sp_pending.lock().insert(state.clone(), verifier);
         Ok(format!(
-            "{}/authorize?client_id={}&response_type=code&redirect_uri={}&scope={}&code_challenge_method=S256&code_challenge={}&state={}",
+            // show_dialog lets you pick a different Spotify account than the one your browser is logged in to.
+            "{}/authorize?client_id={}&response_type=code&redirect_uri={}&scope={}&code_challenge_method=S256&code_challenge={}&state={}&show_dialog=true",
             self.opts.spotify_accounts_base, url_encode(&client_id), url_encode(&self.spotify_redirect_uri()),
             url_encode(SCOPES), challenge, state
         ))
@@ -40,23 +41,34 @@ impl App {
         let state = params.get("state").cloned().unwrap_or_default();
         let verifier = self.sp_pending.lock().remove(&state).ok_or_else(|| ApiError::bad("Login session expired, please try again"))?;
         let client_id = self.config.lock().data.spotify.client_id.clone();
-        self.spotify_token(&[
+        let prev = self.spotify_snapshot();
+        {
+            // The new login's tokens replace the active ones; start from a clean slate so a
+            // refresh token from the previous account can't leak into the new one.
+            let mut cfg = self.config.lock();
+            cfg.data.spotify.tokens = None;
+        }
+        let r = self.spotify_token(&[
             ("grant_type", "authorization_code"),
             ("code", params.get("code").map(|s| s.as_str()).unwrap_or("")),
             ("redirect_uri", &self.spotify_redirect_uri()),
             ("client_id", &client_id),
             ("code_verifier", &verifier),
-        ]).await?;
-        let me = self.spotify_api("GET", "/me", None).await?;
-        {
-            let mut cfg = self.config.lock();
-            cfg.data.spotify.user = Some(SpotifyUser {
-                id: s(&me["id"]),
-                name: if me["display_name"].is_string() { s(&me["display_name"]) } else { s(&me["id"]) },
-            });
-            cfg.save();
-        }
-        crate::logf!("[spotify] logged in");
+        ]).await;
+        let me = match r {
+            Ok(()) => self.spotify_api("GET", "/me", None).await,
+            Err(e) => Err(e),
+        };
+        let me = match me {
+            Ok(m) => m,
+            Err(e) => { self.spotify_restore(prev); return Err(e); }
+        };
+        let user = SpotifyUser {
+            id: s(&me["id"]),
+            name: if me["display_name"].is_string() { s(&me["display_name"]) } else { s(&me["id"]) },
+        };
+        crate::logf!("[spotify] logged in as {}", user.name);
+        self.spotify_after_login(prev, user);
         Ok(())
     }
 
@@ -106,11 +118,10 @@ impl App {
         Ok((t3.access_token, t3.expires_at))
     }
 
+    /// Log out of the active account (the next linked account, if any, becomes active).
     pub fn spotify_logout(&self) {
-        let mut cfg = self.config.lock();
-        cfg.data.spotify.tokens = None;
-        cfg.data.spotify.user = None;
-        cfg.save();
+        let id = self.config.lock().data.spotify.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
+        let _ = self.account_remove("spotify", &id);
     }
 
     pub async fn spotify_api(&self, method: &str, path: &str, body: Option<Value>) -> ApiResult {
