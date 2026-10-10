@@ -109,12 +109,13 @@ jobs:
       - name: Generate Android project
         run: |
           set -e
-          scripts/ci-run.sh npx --yes ${{ env.TAURI_CLI }} android init --ci
-          scripts/ci-run.sh npx --yes ${{ env.TAURI_CLI }} icon src-tauri/icons/icon.png
+          npm install --no-audit --no-fund
+          scripts/ci-run.sh npm run tauri -- android init --ci
+          scripts/ci-run.sh npm run tauri -- icon src-tauri/icons/icon.png
           scripts/ci-run.sh python3 scripts/android-patch.py
 
       - name: Build APK
-        run: scripts/ci-run.sh npx --yes ${{ env.TAURI_CLI }} android build --apk --target aarch64 --target armv7 --ci
+        run: scripts/ci-run.sh npm run tauri -- android build --apk --target aarch64 --target armv7 --ci
 
       - name: Sign APK
         env:
