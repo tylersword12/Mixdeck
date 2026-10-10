@@ -59,15 +59,15 @@ jobs:
       - name: Install system libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+          scripts/ci-run.sh sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
             libgtk-3-dev patchelf libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav rpm file
 
       - name: Unit tests
-        run: cargo test -p mixdeck-core --lib
+        run: scripts/ci-run.sh cargo test -p mixdeck-core --lib
 
       - name: Build MixDeck
-        run: npx --yes ${{ env.TAURI_CLI }} build --bundles deb,rpm,appimage
+        run: scripts/ci-run.sh npx --yes ${{ env.TAURI_CLI }} build --bundles deb,rpm,appimage
 
       - name: Collect packages
         run: |
@@ -83,7 +83,7 @@ jobs:
           path: out/*
 
   android:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -100,18 +100,20 @@ jobs:
         with:
           node-version: 22
 
-      - name: Generate Android project
-        env:
-          NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+      - name: Point Tauri at the Android NDK
         run: |
-          npx --yes ${{ env.TAURI_CLI }} android init --ci
-          npx --yes ${{ env.TAURI_CLI }} icon src-tauri/icons/icon.png
-          python3 scripts/android-patch.py
+          echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$ANDROID_HOME, NDK=$ANDROID_NDK_LATEST_HOME"
+
+      - name: Generate Android project
+        run: |
+          set -e
+          scripts/ci-run.sh npx --yes ${{ env.TAURI_CLI }} android init --ci
+          scripts/ci-run.sh npx --yes ${{ env.TAURI_CLI }} icon src-tauri/icons/icon.png
+          scripts/ci-run.sh python3 scripts/android-patch.py
 
       - name: Build APK
-        env:
-          NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
-        run: npx --yes ${{ env.TAURI_CLI }} android build --apk --target aarch64 --target armv7 --ci
+        run: scripts/ci-run.sh npx --yes ${{ env.TAURI_CLI }} android build --apk --target aarch64 --target armv7 --ci
 
       - name: Sign APK
         env:
