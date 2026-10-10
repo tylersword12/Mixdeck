@@ -129,7 +129,7 @@ function renderNowPlaying() {
   const np = $('#np');
   if (!t) {
     np.innerHTML = `<div class="np"><div class="muted">${R.state.queue.length ? 'Tap a track in the queue to start.' : 'Your queue is empty. Search or open your library to add music.'}</div>
-      ${R.state.queue.length ? '<div class="ctl"><button class="round primary" id="np-play">▶</button></div>' : ''}</div>`;
+      ${R.state.queue.length ? '<div class="ctl"><button class="round primary" id="np-play" title="Play">${ICON.play}</button></div>' : ''}</div>`;
   } else {
     const trans = st.transition ? `<div class="pill wait small">Crossfading…</div>` : st.message ? `<div class="pill wait small">${esc(st.message)}</div>` : '';
     np.innerHTML = `<div class="np"><div class="np-top">${art(t.artwork)}<div style="min-width:0;flex:1">
@@ -138,9 +138,9 @@ function renderNowPlaying() {
       <input type="range" id="np-seek" min="0" max="${st.duration || t.duration || 1}" value="${livePosition(st)}" step="1000">
       <div class="times"><span id="np-pos">${fmtTime(livePosition(st))}</span><span>${fmtTime(st.duration || t.duration)}</span></div>
       <div class="ctl">
-        <button class="round" id="np-prev">⏮</button>
-        <button class="round primary" id="np-play">${st.playing ? '❚❚' : '▶'}</button>
-        <button class="round" id="np-next">⏭</button>
+        <button class="round" id="np-prev" title="Previous">${ICON.prev}</button>
+        <button class="round primary" id="np-play" title="${st.playing ? 'Pause' : 'Play'}">${st.playing ? ICON.pause : ICON.play}</button>
+        <button class="round" id="np-next" title="Next">${ICON.next}</button>
       </div>
       <div class="vol" style="justify-content:center;margin-top:10px">Vol <input id="np-vol" type="range" min="0" max="1" step="0.01" value="${st.volume ?? 1}"></div></div>`;
     const seek = $('#np-seek');
@@ -164,7 +164,7 @@ function renderMini() {
   const pct = st.duration ? Math.min(100, (livePosition(st) / st.duration) * 100) : 0;
   mini.innerHTML = `<div class="prog" style="width:${pct}%"></div>${art(t.artwork)}
     <div class="m"><div class="t">${esc(t.title)}</div><div class="a">${esc(t.artist)}</div></div>
-    <button id="mini-play">${st.playing ? '❚❚' : '▶'}</button><button id="mini-next">⏭</button>`;
+    <button id="mini-play" title="${st.playing ? 'Pause' : 'Play'}">${st.playing ? ICON.pause : ICON.play}</button><button id="mini-next" title="Next">${ICON.next}</button>`;
   mini.querySelector('.m').onclick = () => show('queue');
   $('#mini-play').onclick = () => cmd('toggle');
   $('#mini-next').onclick = () => cmd('next');
@@ -350,7 +350,7 @@ function showTrackCollection(box, name, tracks, extraActions = [], menuFor = bro
   const playable = tracks.filter(t => !['drm', 'unavailable'].includes(t.playable));
   box.innerHTML = (name ? `<h2>${esc(name)}</h2>` : '') +
     `<div class="row-actions">
-      <button class="primary" data-b="play">▶ Play all</button>
+      <button class="primary" data-b="play"><span class="ic">${ICON.play}</span>Play all</button>
       <button class="ghost" data-b="add">Add all to queue</button>
       <button class="ghost" data-b="save">Save as playlist</button>
       ${extraActions.map((a, i) => `<button class="ghost" data-x="${i}">${esc(a[0])}</button>`).join('')}

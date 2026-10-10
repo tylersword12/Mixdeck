@@ -190,3 +190,15 @@ h3 { font-size: 15px; margin: 18px 0 8px; }
 
 select { width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; color: var(--text); }
 .logview { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 12px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-all; max-height: 55vh; overflow: auto; margin: 8px 6px; }
+
+/* transport icons */
+.round svg { width: 46%; height: 46%; display: block; }
+.round.primary svg { width: 44%; height: 44%; }
+.round { line-height: 0; }
+.mini button { display: grid; place-items: center; padding: 0; color: var(--text); }
+.mini button svg { width: 22px; height: 22px; display: block; }
+.ic { display: inline-grid; width: 14px; height: 14px; }
+.ic svg { width: 100%; height: 100%; }
+/* Round transport buttons: override the generic pill-button padding/alignment so the
+   icon sits dead centre. */
+button.round, button.round.primary { display: grid; place-items: center; padding: 0; gap: 0; border-radius: 50%; }

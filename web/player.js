@@ -617,7 +617,12 @@ function render() {
     const bar = $('#now .bar > div');
     if (bar) { bar.style.width = (dur ? Math.min(100, (pos / dur) * 100) : 0) + '%'; $('#now .pos').textContent = fmtTime(pos); $('#now .dur').textContent = fmtTime(dur); }
   }
-  $('#playbtn').textContent = c && !engine.paused ? '❚❚' : '▶';
+  const showPause = !!(c && !engine.paused);
+  if ($('#playbtn').dataset.icon !== String(showPause)) {
+    $('#playbtn').innerHTML = showPause ? ICON.pause : ICON.play;
+    $('#playbtn').dataset.icon = String(showPause);
+    $('#playbtn').title = showPause ? 'Pause' : 'Play';
+  }
   $('#loading').textContent = engine.loading || '';
   const spEl = $('#spstatus');
   spEl.className = 'pill ' + (sp.ready ? 'ok' : sp.error ? 'bad' : 'wait');
@@ -666,6 +671,9 @@ async function start() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  $('#prevbtn').innerHTML = ICON.prev;
+  $('#nextbtn').innerHTML = ICON.next;
+  $('#playbtn').innerHTML = ICON.play;
   const boot = () => start().catch(e => { log(e.message, 'error'); $('#start').disabled = false; });
   if (AUTO) boot();
   else $('#start').addEventListener('click', boot, { once: true });
