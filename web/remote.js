@@ -108,14 +108,19 @@ function closeSheet() { $('#sheet').classList.remove('open'); $('#sheet-bg').cla
 // Views
 // ---------------------------------------------------------------------------
 function show(view) {
-  if (view === 'queue' && WIDE()) view = 'search';
+  // Wide windows show the queue as a column, so "Now Playing" is its own page there;
+  // narrow ones show now-playing above the queue.
+  if (view === 'queue' && WIDE()) view = 'nowplaying';
+  if (view === 'nowplaying' && !WIDE()) view = 'queue';
   R.view = view;
+  document.body.dataset.view = view;
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'v-' + view));
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.view === view));
   if (location.hash !== '#' + view) history.replaceState(null, '', '#' + view);
   if (view === 'library') renderLibrary();
   if (view === 'saved') renderSaved();
   if (view === 'settings') renderSettings();
+  if (view === 'nowplaying') renderBigNp();
   if (view === 'search') setTimeout(() => { if (WIDE()) $('#search-q').focus(); }, 0);
   window.scrollTo(0, 0);
 }
@@ -153,6 +158,54 @@ function renderNowPlaying() {
   const play = $('#np-play');
   if (play) play.onclick = () => cmd(t ? 'toggle' : 'play');
   renderMini();
+  if (R.view === 'nowplaying') renderBigNp();
+}
+
+// The Now Playing page on wide windows: big artwork, controls and what's up next.
+function renderBigNp() {
+  const el = $('#bignp');
+  if (!el) return;
+  const t = currentTrack();
+  const st = R.state.status || {};
+  const q = R.state.queue;
+  if (!t) {
+    el.innerHTML = `<div class="bnp-empty">${q.length ? 'Nothing is playing. Pick a track in the queue, or press play.' : 'Nothing is playing. Search or open your library to add music.'}
+      ${q.length ? `<div class="ctl" style="display:flex;justify-content:center;margin-top:14px"><button class="round primary" id="bnp-play" title="Play">${ICON.play}</button></div>` : ''}</div>`;
+    const p = $('#bnp-play'); if (p) p.onclick = () => cmd('play');
+    return;
+  }
+  const ci = q.findIndex(x => x.uid === t.uid);
+  const upNext = q.slice(ci + 1, ci + 9);
+  const note = st.transition ? `<div class="pill wait small" style="margin-top:8px">Crossfading…</div>` : st.message ? `<div class="pill wait small" style="margin-top:8px">${esc(st.message)}</div>` : '';
+  const dur = st.duration || t.duration || 1;
+  el.innerHTML = `<div class="bnp">${art(t.artwork, 'bart')}<div class="binfo">
+      <div class="lbl"><span class="badge ${t.source}">${SOURCE_LABEL[t.source]}</span></div>
+      <div class="t">${esc(t.title)}</div><div class="a">${esc(t.artist)}</div>${note}
+      <input type="range" class="seek" id="bnp-seek" min="0" max="${dur}" value="${livePosition(st)}" step="1000">
+      <div class="times"><span id="bnp-pos">${fmtTime(livePosition(st))}</span><span>${fmtTime(st.duration || t.duration)}</span></div>
+      <div class="ctl">
+        <button class="round" id="bnp-prev" title="Previous">${ICON.prev}</button>
+        <button class="round primary" id="bnp-play" title="${st.playing ? 'Pause' : 'Play'}">${st.playing ? ICON.pause : ICON.play}</button>
+        <button class="round" id="bnp-next" title="Next">${ICON.next}</button>
+      </div>
+      <div class="vol">Vol <input id="bnp-vol" type="range" min="0" max="1" step="0.01" value="${st.volume ?? 1}"></div>
+    </div></div>
+    <h3>Up next</h3>
+    ${upNext.length ? '<ul class="list" id="bnp-next-list"></ul>' : '<div class="empty-note">Nothing queued after this track.</div>'}`;
+  const seek = $('#bnp-seek');
+  seek.addEventListener('input', () => { R.seeking = true; $('#bnp-pos').textContent = fmtTime(Number(seek.value)); });
+  seek.addEventListener('change', () => { cmd('seek', { ms: Number(seek.value) }).finally(() => { R.seeking = false; }); });
+  $('#bnp-prev').onclick = () => cmd('prev');
+  $('#bnp-next').onclick = () => cmd('next');
+  $('#bnp-play').onclick = () => cmd('toggle');
+  $('#bnp-vol').addEventListener('change', e => cmd('volume', { value: Number(e.target.value) }));
+  const ul = $('#bnp-next-list');
+  if (ul) {
+    const nextUid = st.next && st.next.uid;
+    ul.innerHTML = upNext.map((x, k) => trackRow(x, { i: ci + 1 + k, tap: 'play', add: false }).replace('<span class="d">',
+      x.uid === nextUid ? `<span class="d">${st.next.ready ? '● ' : '◌ '}` : '<span class="d">')).join('');
+    bindTrackList(ul, q, queueMenu);
+  }
 }
 
 function renderMini() {
@@ -175,6 +228,7 @@ function tickProgress() {
   if (!st.playing) return;
   const pos = livePosition(st);
   if (!R.seeking && $('#np-seek')) { $('#np-seek').value = pos; $('#np-pos').textContent = fmtTime(pos); }
+  if (!R.seeking && $('#bnp-seek')) { $('#bnp-seek').value = pos; $('#bnp-pos').textContent = fmtTime(pos); }
   const p = $('#mini .prog');
   if (p && st.duration) p.style.width = Math.min(100, (pos / st.duration) * 100) + '%';
 }
@@ -191,7 +245,11 @@ function renderQueue() {
     return trackRow(t, { i, cls, tap: 'play', add: false, grip: true }).replace('<span class="d">',
       t.uid === nextUid ? `<span class="d">${R.state.status.next.ready ? '● ' : '◌ '}` : '<span class="d">');
   }).join('');
-  bindTrackList(ul, q, t => {
+  bindTrackList(ul, q, queueMenu);
+  ul.querySelectorAll('.grip').forEach(g => g.addEventListener('pointerdown', e => startDrag(e, g, ul)));
+}
+
+function queueMenu(t) {
     const i = R.state.queue.findIndex(x => x.uid === t.uid);
     return [
       ['Play now', () => cmd('play', { uid: t.uid })],
@@ -202,8 +260,6 @@ function renderQueue() {
       ['Add to a saved playlist…', () => pickSavedPlaylist([t])],
       ['Remove from queue', () => cmd('remove', { uid: t.uid }), 'danger'],
     ];
-  });
-  ul.querySelectorAll('.grip').forEach(g => g.addEventListener('pointerdown', e => startDrag(e, g, ul)));
 }
 
 // ---- Drag to reorder ---------------------------------------------------------
@@ -253,7 +309,7 @@ function startDrag(e, grip, ul) {
   const edges = () => {
     if (wide) { const r = scroller.getBoundingClientRect(); return [Math.max(0, r.top), Math.min(window.innerHeight, r.bottom)]; }
     const headH = document.querySelector('.r-head').getBoundingClientRect().bottom;
-    return [headH, window.innerHeight - 130]; // mini player + tab bar cover the bottom on phones
+    return [headH, window.innerHeight - 70]; // the tab bar covers the bottom on phones
   };
   const tick = () => {
     if (done) return;
@@ -695,6 +751,8 @@ async function showLog() {
 // Live updates
 // ---------------------------------------------------------------------------
 function fitQueueColumn() {
+  const head = $('.r-head');
+  if (head) document.documentElement.style.setProperty('--headh', Math.round(head.getBoundingClientRect().height) + 'px');
   const tabs = $('#tabs');
   if (tabs) document.documentElement.style.setProperty('--qtop', Math.round(tabs.getBoundingClientRect().bottom + window.scrollY) + 'px');
 }
@@ -784,7 +842,7 @@ $('#q-save').onclick = saveQueue;
 $('#q-shuffle').onclick = () => cmd('shuffle').then(() => toast('Shuffled'));
 $('#q-clear').onclick = () => { if (confirm('Clear the queue? The current track keeps playing.')) cmd('clear', { keepCurrent: true }); };
 window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (v && v !== R.view) show(v); });
-window.addEventListener('resize', () => { if (R.view === 'queue' && WIDE()) show('search'); });
+window.addEventListener('resize', () => { if ((R.view === 'queue' && WIDE()) || (R.view === 'nowplaying' && !WIDE())) show(R.view); });
 
 api('/api/info').then(i => { R.info = i; renderHost(); syncEmbeddedPlayer(); }).catch(() => {});
 connect();

@@ -18,9 +18,11 @@
     <span id="hoststatus" class="pill wait">Connecting…</span>
   </header>
   <div id="banner" class="banner"></div>
+  <div class="mini" id="mini"></div>
 
   <nav class="tabs" id="tabs">
-    <button class="t-queue" data-view="queue"><span class="i">≡</span>Queue</button>
+    <button class="t-np" data-view="nowplaying"><span class="i">▶</span>Now Playing</button>
+    <button class="t-queue" data-view="queue"><span class="i">▶</span>Now Playing</button>
     <button data-view="search"><span class="i">⌕</span>Search</button>
     <button data-view="library"><span class="i">♫</span>Library</button>
     <button data-view="saved"><span class="i">★</span>Playlists</button>
@@ -39,6 +41,8 @@
     </section>
 
     <div class="right">
+      <section id="v-nowplaying" class="view"><div id="bignp"></div></section>
+
       <section id="v-search" class="view">
         <div class="seg" id="search-src">
           <button data-src="spotify" class="on">Spotify</button>
@@ -62,8 +66,6 @@
       <section id="v-settings" class="view"><div id="settings"></div></section>
     </div>
   </div>
-
-  <div class="mini" id="mini"></div>
 
   <div class="sheet-bg" id="sheet-bg"></div>
   <div class="sheet" id="sheet"></div>
