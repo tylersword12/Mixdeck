@@ -320,47 +320,159 @@ async fn media(State(app): S, Path((key, file)): Path<(String, String)>, headers
         return StatusCode::NOT_FOUND.into_response();
     }
     let path = app.cache.dir.join(&key).join(&file);
-    let Ok(meta) = tokio::fs::metadata(&path).await else { return StatusCode::NOT_FOUND.into_response() };
-    let size = meta.len();
-    let ext = file.rsplit('.').next().unwrap_or("").to_lowercase();
-    let ct = match ext.as_str() {
+    // Still downloading? Serve what's there and keep feeding the rest as it arrives.
+    if let Some(rx) = app.cache_live(&key) {
+        let p = rx.borrow().clone();
+        if !p.done && p.error.is_none() {
+            if p.kind == "file" && p.file == file {
+                return serve_growing(path, rx, &headers).await;
+            }
+            // An HLS segment (or anything else) that isn't on disk yet: wait for it.
+            wait_for_file(&path, rx).await;
+        }
+    }
+    serve_static(&path, &file, &headers).await
+}
+
+fn content_type(file: &str) -> &'static str {
+    match file.rsplit('.').next().unwrap_or("").to_lowercase().as_str() {
         "m3u8" => "application/vnd.apple.mpegurl", "ts" => "video/mp2t", "m4s" => "video/iso.segment",
         "mp4" | "m4a" => "audio/mp4", "aac" => "audio/aac", "mp3" => "audio/mpeg", "webm" => "audio/webm",
         "opus" | "ogg" => "audio/ogg", _ => "application/octet-stream",
+    }
+}
+
+fn parse_range(headers: &HeaderMap) -> Option<(String, String)> {
+    let r = headers.get(header::RANGE)?.to_str().ok()?.strip_prefix("bytes=")?.to_string();
+    let (a, b) = r.split_once('-')?;
+    Some((a.trim().to_string(), b.trim().to_string()))
+}
+
+/// Resolve a Range header against a known size: Ok((start, end)) or Err(()) if unsatisfiable.
+fn resolve_range(range: &(String, String), size: u64) -> Result<(u64, u64), ()> {
+    let (a, b) = range;
+    let (start, end) = if a.is_empty() {
+        let n: u64 = b.parse().unwrap_or(0);
+        (size.saturating_sub(n), size.saturating_sub(1))
+    } else {
+        let start: u64 = a.parse().unwrap_or(0);
+        let end: u64 = if b.is_empty() { size.saturating_sub(1) } else { b.parse::<u64>().unwrap_or(size.saturating_sub(1)).min(size.saturating_sub(1)) };
+        (start, end)
     };
-    let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok()).and_then(|r| {
-        let r = r.strip_prefix("bytes=")?;
-        let (a, b) = r.split_once('-')?;
-        Some((a.trim().to_string(), b.trim().to_string()))
-    });
+    if size == 0 || start >= size || start > end { Err(()) } else { Ok((start, end)) }
+}
+
+async fn wait_for_file(path: &std::path::Path, mut rx: tokio::sync::watch::Receiver<crate::cache::Progress>) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(90);
+    loop {
+        if tokio::fs::metadata(path).await.is_ok() { return; }
+        {
+            let p = rx.borrow_and_update();
+            if p.done || p.error.is_some() { return; }
+        }
+        match tokio::time::timeout_at(deadline, rx.changed()).await {
+            Ok(Ok(())) => continue,
+            _ => return, // finished (channel closed) or gave up
+        }
+    }
+}
+
+async fn serve_static(path: &std::path::Path, file: &str, headers: &HeaderMap) -> Response {
+    let Ok(meta) = tokio::fs::metadata(path).await else { return StatusCode::NOT_FOUND.into_response() };
+    let size = meta.len();
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
-    let Ok(mut f) = tokio::fs::File::open(&path).await else { return StatusCode::NOT_FOUND.into_response() };
+    let Ok(mut f) = tokio::fs::File::open(path).await else { return StatusCode::NOT_FOUND.into_response() };
     let mut h = HeaderMap::new();
-    h.insert(header::CONTENT_TYPE, HeaderValue::from_static(ct));
+    h.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type(file)));
     h.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-    if let Some((a, b)) = range {
-        let (start, end) = if a.is_empty() {
-            let n: u64 = b.parse().unwrap_or(0);
-            (size.saturating_sub(n), size.saturating_sub(1))
-        } else {
-            let start: u64 = a.parse().unwrap_or(0);
-            let end: u64 = if b.is_empty() { size.saturating_sub(1) } else { b.parse::<u64>().unwrap_or(size - 1).min(size.saturating_sub(1)) };
-            (start, end)
-        };
-        if size == 0 || start >= size || start > end {
+    if let Some(range) = parse_range(headers) {
+        let Ok((start, end)) = resolve_range(&range, size) else {
             h.insert(header::CONTENT_RANGE, HeaderValue::from_str(&format!("bytes */{size}")).unwrap());
             return (StatusCode::RANGE_NOT_SATISFIABLE, h).into_response();
-        }
+        };
         let len = end - start + 1;
         if f.seek(std::io::SeekFrom::Start(start)).await.is_err() { return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
-        let reader = f.take(len);
         h.insert(header::CONTENT_RANGE, HeaderValue::from_str(&format!("bytes {start}-{end}/{size}")).unwrap());
         h.insert(header::CONTENT_LENGTH, HeaderValue::from(len));
-        return (StatusCode::PARTIAL_CONTENT, h, Body::from_stream(tokio_util::io::ReaderStream::new(reader))).into_response();
+        return (StatusCode::PARTIAL_CONTENT, h, Body::from_stream(tokio_util::io::ReaderStream::new(f.take(len)))).into_response();
     }
     h.insert(header::CONTENT_LENGTH, HeaderValue::from(size));
     (StatusCode::OK, h, Body::from_stream(tokio_util::io::ReaderStream::new(f))).into_response()
+}
+
+/// Stream a file that is still being downloaded: send bytes as they land on disk.
+/// With a known final size this supports Range requests (so seeking works); without one
+/// it's a plain stream from the start.
+async fn serve_growing(path: std::path::PathBuf, rx: tokio::sync::watch::Receiver<crate::cache::Progress>, headers: &HeaderMap) -> Response {
+    let file = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let expected = rx.borrow().expected;
+    let mut h = HeaderMap::new();
+    h.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type(&file)));
+    h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    let (status, start, end) = match (expected, parse_range(headers)) {
+        (Some(total), Some(range)) => match resolve_range(&range, total) {
+            Ok((a, b)) => {
+                h.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+                h.insert(header::CONTENT_RANGE, HeaderValue::from_str(&format!("bytes {a}-{b}/{total}")).unwrap());
+                h.insert(header::CONTENT_LENGTH, HeaderValue::from(b - a + 1));
+                (StatusCode::PARTIAL_CONTENT, a, Some(b))
+            }
+            Err(()) => {
+                h.insert(header::CONTENT_RANGE, HeaderValue::from_str(&format!("bytes */{total}")).unwrap());
+                return (StatusCode::RANGE_NOT_SATISFIABLE, h).into_response();
+            }
+        },
+        (Some(total), None) => {
+            h.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+            h.insert(header::CONTENT_LENGTH, HeaderValue::from(total));
+            (StatusCode::OK, 0, Some(total - 1))
+        }
+        (None, _) => (StatusCode::OK, 0, None), // size unknown: stream until the download ends
+    };
+    let body = async_stream::stream! {
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+        let mut rx = rx;
+        let mut f = match tokio::fs::File::open(&path).await {
+            Ok(f) => f,
+            Err(e) => { yield Err(e); return; }
+        };
+        if start > 0 { if let Err(e) = f.seek(std::io::SeekFrom::Start(start)).await { yield Err(e); return; } }
+        let mut pos = start;
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            if let Some(end) = end { if pos > end { break; } }
+            let (avail, finished, failed) = {
+                let p = rx.borrow_and_update();
+                (p.written, p.done, p.error.clone())
+            };
+            // Once the download is over, whatever is on disk is final.
+            let avail = if finished || rx.has_changed().is_err() {
+                tokio::fs::metadata(&path).await.map(|m| m.len()).unwrap_or(avail)
+            } else { avail };
+            if avail > pos {
+                let mut want = (avail - pos).min(buf.len() as u64);
+                if let Some(end) = end { want = want.min(end + 1 - pos); }
+                match f.read(&mut buf[..want as usize]).await {
+                    Ok(0) => {}
+                    Ok(n) => { pos += n as u64; yield Ok(axum::body::Bytes::copy_from_slice(&buf[..n])); continue; }
+                    Err(e) => { yield Err(e); return; }
+                }
+            }
+            if let Some(err) = failed { yield Err(std::io::Error::other(err)); return; }
+            if finished || rx.has_changed().is_err() {
+                // Nothing more is coming.
+                if end.map(|e| pos <= e).unwrap_or(false) { yield Err(std::io::Error::other("download ended early")); }
+                return;
+            }
+            // Wait for more bytes (or the end of the download).
+            match tokio::time::timeout(std::time::Duration::from_secs(60), rx.changed()).await {
+                Ok(_) => {}
+                Err(_) => { yield Err(std::io::Error::other("download stalled")); return; }
+            }
+        }
+    };
+    (status, h, Body::from_stream(body)).into_response()
 }
 
 // ---------------------------------------------------------------------------

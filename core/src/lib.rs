@@ -50,3 +50,6 @@ pub fn default_data_dir() -> std::path::PathBuf {
 
 /// Open a link in the user's default browser.
 pub fn util_open(url: &str) -> std::io::Result<()> { open::that_detached(url) }
+
+/// Bytes of a single-file download needed before playback can start.
+pub fn cache_start_bytes() -> u64 { 96 * 1024 }

@@ -90,9 +90,20 @@ class ScDeck {
     const prep = await api(`/api/prepare/${track.source}/${encodeURIComponent(track.id)}`, { method: 'POST' });
     if (token !== this.token) throw new Error('superseded');
     this.preview = prep.preview;
+    this.partial = !!prep.partial; // still downloading: playback starts now, the rest streams in
     if (prep.type === 'hls' && window.Hls && Hls.isSupported()) {
       // Buffer the whole track: the file is already on local disk, so this is instant.
-      this.hls = new Hls({ maxBufferLength: 3600, maxMaxBufferLength: 3600, maxBufferSize: 300 * 1000 * 1000, backBufferLength: 90, startPosition: 0 });
+      // Segments that are still downloading make requests wait on the server, so be patient
+      // with time-to-first-byte rather than treating it as a failure.
+      const patient = {
+        maxTimeToFirstByteMs: 90000, maxLoadTimeMs: 180000,
+        timeoutRetry: { maxNumRetry: 3, retryDelayMs: 0, maxRetryDelayMs: 0 },
+        errorRetry: { maxNumRetry: 6, retryDelayMs: 1000, maxRetryDelayMs: 8000 },
+      };
+      this.hls = new Hls({
+        maxBufferLength: 3600, maxMaxBufferLength: 3600, maxBufferSize: 300 * 1000 * 1000, backBufferLength: 90, startPosition: 0,
+        fragLoadPolicy: { default: patient },
+      });
       this.hls.on(Hls.Events.ERROR, (e, d) => { if (d.fatal) log(`HLS error (${d.details}) on ${track.title}`, 'error'); });
       this.hls.loadSource(prep.src);
       this.hls.attachMedia(this.el);
@@ -106,11 +117,11 @@ class ScDeck {
       const timer = setTimeout(() => { cleanup(); reject(new Error('Timed out loading audio')); }, 30000);
       const cleanup = () => {
         clearTimeout(timer);
-        this.el.removeEventListener('canplaythrough', done); this.el.removeEventListener('error', fail);
+        this.el.removeEventListener('canplay', done); this.el.removeEventListener('error', fail);
         if (this.hls) this.hls.off(Hls.Events.ERROR, hlsFail);
       };
-      if (this.el.readyState >= 4) return done();
-      this.el.addEventListener('canplaythrough', done);
+      if (this.el.readyState >= 3) return done();
+      this.el.addEventListener('canplay', done);
       this.el.addEventListener('error', fail);
       if (this.hls) this.hls.on(Hls.Events.ERROR, hlsFail);
     });
@@ -283,7 +294,9 @@ const engine = {
   run(fn) {
     const job = this.chain.then(fn).catch(e => { if (e.message !== 'superseded') log(e.message, 'error'); });
     // Watchdog: even if a step hangs, later commands (skip, pause…) still get their turn.
-    this.chain = Promise.race([job, sleep(30000).then(() => log('A player step took too long; moving on', 'error'))]);
+    let finished = false;
+    job.finally(() => { finished = true; });
+    this.chain = Promise.race([job, sleep(30000).then(() => { if (!finished) log('A player step took too long; moving on', 'error'); })]);
     job.finally(() => { report(); render(); });
     return job;
   },

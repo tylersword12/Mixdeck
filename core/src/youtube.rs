@@ -190,27 +190,69 @@ impl App {
         }
     }
 
-    /// Download the audio-only stream into dir. Prefers AAC (m4a), which every browser plays.
-    pub async fn yt_download(&self, id: &str, dir: &Path, on_progress: impl Fn(f64) + Send + Sync + 'static) -> ApiResult {
+    /// Download the audio-only stream into dir, reporting progress through `tx` so the
+    /// player can start on the file while it's still arriving. Prefers AAC (m4a).
+    pub async fn yt_download(&self, id: &str, dir: &Path, tx: tokio::sync::watch::Sender<crate::cache::Progress>, on_progress: impl Fn(f64) + Send + Sync + 'static) -> ApiResult {
         if !valid_id(id) { return Err(ApiError::bad("bad video id")); }
         let file: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let f2 = file.clone();
+        let tx2 = tx.clone();
         let re_prog = regex::Regex::new(r"^PROGRESS\s+([\d.]+)%").unwrap();
         let cb: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(move |line: &str| {
             if let Some(c) = re_prog.captures(line) { on_progress(c[1].parse::<f64>().unwrap_or(0.0) / 100.0); }
-            if let Some(rest) = line.strip_prefix("FILE ") { *f2.lock() = Some(rest.trim().to_string()); }
+            // Printed just before the download starts: the extension and (usually) exact size.
+            if let Some(rest) = line.strip_prefix("START ") {
+                let mut parts = rest.split_whitespace();
+                let ext = parts.next().unwrap_or("m4a").to_string();
+                let size = parts.next().and_then(|v| v.parse::<u64>().ok());
+                let name = format!("audio.{ext}");
+                *f2.lock() = Some(name.clone());
+                let mime = mime_for(&ext).to_string();
+                tx2.send_modify(|p| { p.kind = "file".into(); p.file = name; p.mime = mime; p.expected = size; });
+            }
+            if let Some(rest) = line.strip_prefix("FILE ") {
+                if let Some(n) = Path::new(rest.trim()).file_name() { *f2.lock() = Some(n.to_string_lossy().to_string()); }
+            }
         });
+        // Watch the file grow so readers know how much is safe to send.
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let poller = {
+            let stop = stop.clone();
+            let file = file.clone();
+            let dir = dir.to_path_buf();
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    let name = file.lock().clone();
+                    if let Some(name) = name {
+                        if let Ok(md) = tokio::fs::metadata(dir.join(&name)).await {
+                            let n = md.len();
+                            tx.send_modify(|p| {
+                                p.written = n;
+                                if n >= crate::cache_start_bytes().min(p.expected.unwrap_or(u64::MAX)) { p.ready = true; }
+                            });
+                        }
+                    }
+                }
+            })
+        };
         let template = dir.join("audio.%(ext)s").display().to_string();
         let args: Vec<String> = [
             "-f", "bestaudio[ext=m4a]/bestaudio[acodec^=opus]/bestaudio/best",
             "--no-playlist", "--no-part", "--no-mtime", "--progress", "--newline",
             "--progress-template", "download:PROGRESS %(progress._percent_str)s",
             "-o", &template,
+            "--print", "before_dl:START %(ext)s %(filesize)s",
             "--print", "after_move:FILE %(filepath)s",
         ].iter().map(|s| s.to_string()).chain(std::iter::once(format!("https://www.youtube.com/watch?v={id}"))).collect();
-        self.ytdlp_run(&args, 600, Some(cb)).await?;
-        let mut name = file.lock().clone().and_then(|p| Path::new(&p).file_name().map(|n| n.to_string_lossy().to_string()));
-        if name.is_none() {
+        let result = self.ytdlp_run(&args, 600, Some(cb)).await;
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = poller.await;
+        result?;
+        let mut name = file.lock().clone();
+        if name.as_ref().map(|n| !dir.join(n).exists()).unwrap_or(true) {
+            name = None;
             if let Ok(mut rd) = tokio::fs::read_dir(dir).await {
                 while let Ok(Some(e)) = rd.next_entry().await {
                     let n = e.file_name().to_string_lossy().to_string();
@@ -220,8 +262,9 @@ impl App {
         }
         let name = name.ok_or_else(|| ApiError::internal("yt-dlp finished but no audio file was written"))?;
         let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
-        let mime = match ext.as_str() { "m4a" | "mp4" => "audio/mp4", "webm" => "audio/webm", "opus" | "ogg" => "audio/ogg", "mp3" => "audio/mpeg", _ => "application/octet-stream" };
         let bytes = tokio::fs::metadata(dir.join(&name)).await.map(|m| m.len()).unwrap_or(0);
+        let mime = mime_for(&ext);
+        tx.send_modify(|p| { p.kind = "file".into(); p.file = name.clone(); p.mime = mime.into(); p.written = bytes; p.expected = Some(bytes); });
         Ok(json!({ "type": "file", "file": name, "mime": mime, "bytes": bytes }))
     }
 
@@ -335,6 +378,10 @@ impl App {
             Err(_) => { self.tools_install(true).await?; Ok(json!({ "output": "Re-downloaded the latest yt-dlp" })) }
         }
     }
+}
+
+pub fn mime_for(ext: &str) -> &'static str {
+    match ext { "m4a" | "mp4" => "audio/mp4", "webm" => "audio/webm", "opus" | "ogg" => "audio/ogg", "mp3" => "audio/mpeg", _ => "application/octet-stream" }
 }
 
 pub fn friendly_error(m: &str) -> String {
