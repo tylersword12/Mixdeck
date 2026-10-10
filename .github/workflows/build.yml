@@ -103,7 +103,7 @@ jobs:
       - name: Point Tauri at the Android NDK
         run: |
           echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
-          echo "BINDGEN_EXTRA_CLANG_ARGS=--sysroot=$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot" >> "$GITHUB_ENV"
+          echo "BINDGEN_EXTRA_CLANG_ARGS=--sysroot=$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot -D__ANDROID_API__=26 -D__ANDROID_MIN_SDK_VERSION__=26" >> "$GITHUB_ENV"
           echo "ANDROID_HOME=$ANDROID_HOME, NDK=$ANDROID_NDK_LATEST_HOME"
 
       - name: Generate Android project
