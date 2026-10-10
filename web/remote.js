@@ -163,7 +163,7 @@ function renderMini() {
   mini.style.display = '';
   const pct = st.duration ? Math.min(100, (livePosition(st) / st.duration) * 100) : 0;
   mini.innerHTML = `<div class="prog" style="width:${pct}%"></div>${art(t.artwork)}
-    <div class="m"><div class="t">${esc(t.title)}</div><div class="a">${esc(t.artist)}</div></div>
+    <div class="m"><div class="t">${esc(t.title)}</div><div class="a">${st.message ? `<span style="color:var(--warn)">${esc(st.message)}…</span>` : esc(t.artist)}</div></div>
     <button id="mini-play" title="${st.playing ? 'Pause' : 'Play'}">${st.playing ? ICON.pause : ICON.play}</button><button id="mini-next" title="Next">${ICON.next}</button>`;
   mini.querySelector('.m').onclick = () => show('queue');
   $('#mini-play').onclick = () => cmd('toggle');

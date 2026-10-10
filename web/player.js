@@ -37,6 +37,12 @@ function drmFailed(reason) {
   log('Spotify needs browser DRM: moving the player to your browser (' + reason + ')', 'error');
   api('/api/player/drm-failed', { method: 'POST', body: { reason } }).catch(() => {});
 }
+// Spotify SDK promises occasionally never settle (e.g. when its connection hiccups). Never
+// let one of those block the player: give each call a deadline.
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const within = (p, ms = 4000) => Promise.race([Promise.resolve(p).catch(() => {}), sleep(ms)]);
+const ABORTED = Symbol('aborted');
+
 const DRM_RE = /EME|DRM|key ?system|widevine|licen[cs]e|MediaKeys/i;
 const S = { state: { queue: [], currentUid: null, settings: { crossfade: 8 } }, master: 1, failed: new Set(), log: [] };
 let ctx, masterGain, scA, scB, sp;
@@ -197,14 +203,14 @@ class SpotifyDeck {
     await p.connect();
     setInterval(async () => {
       if (!this.track || !this.player) return;
-      const st = await this.player.getCurrentState();
+      const st = await within(this.player.getCurrentState(), 2000);
       if (st) { this.state = st; this.stateAt = performance.now(); }
     }, 400);
   }
 
   async webApi(path, opts = {}) {
     const { token } = await api('/api/spotify/token');
-    const res = await fetch('https://api.spotify.com/v1' + path, { ...opts, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' } });
+    const res = await fetch('https://api.spotify.com/v1' + path, { ...opts, signal: AbortSignal.timeout(10000), headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' } });
     if (!res.ok && res.status !== 204) {
       const j = await res.json().catch(() => ({}));
       throw new Error('Spotify: ' + ((j.error && j.error.message) || res.status));
@@ -237,7 +243,7 @@ class SpotifyDeck {
   get duration() { return this.state && this.matches(this.track) ? this.state.duration : (this.track ? this.track.duration : 0); }
   get playing() { return !!(this.state && this.track && !this.state.paused && this.matches(this.track)); }
 
-  setLevel(v) { this.level = v; return this.player ? this.player.setVolume(Math.max(0, Math.min(1, v * S.master))).catch(() => {}) : Promise.resolve(); }
+  setLevel(v) { this.level = v; return this.player ? within(this.player.setVolume(Math.max(0, Math.min(1, v * S.master))), 2000) : Promise.resolve(); }
   applyMaster() { return this.setLevel(this.level); }
 
   // The SDK has no scheduled ramps, so step the volume ~16x per second.
@@ -257,10 +263,10 @@ class SpotifyDeck {
     return { promise, finish: () => { stop = true; } };
   }
 
-  pause() { return this.player && this.player.pause(); }
-  resume() { return this.player && this.player.resume(); }
-  seek(ms) { return this.player && this.player.seek(Math.round(ms)); }
-  async stop() { const had = this.track; this.track = null; if (had && this.player) await this.player.pause().catch(() => {}); }
+  pause() { return this.player && within(this.player.pause()); }
+  resume() { return this.player && within(this.player.resume()); }
+  seek(ms) { return this.player && within(this.player.seek(Math.round(ms))); }
+  async stop() { const had = this.track; this.track = null; if (had && this.player) await within(this.player.pause()); }
 }
 
 // ---------------------------------------------------------------------------
@@ -276,10 +282,32 @@ const engine = {
 
   run(fn) {
     const job = this.chain.then(fn).catch(e => { if (e.message !== 'superseded') log(e.message, 'error'); });
-    this.chain = job;
+    // Watchdog: even if a step hangs, later commands (skip, pause…) still get their turn.
+    this.chain = Promise.race([job, sleep(30000).then(() => log('A player step took too long; moving on', 'error'))]);
     job.finally(() => { report(); render(); });
     return job;
   },
+
+  // Long waits (a song still downloading, Spotify starting) give way as soon as a newer
+  // transport command arrives, instead of making it queue up behind them.
+  gen: 0,
+  lastInterrupt: null,
+  abortWaiters: new Set(),
+  interrupt(type) {
+    this.gen++;
+    this.lastInterrupt = type;
+    for (const r of this.abortWaiters) r();
+    this.abortWaiters.clear();
+  },
+  async wait(promise) {
+    let abort;
+    const aborted = new Promise(r => { abort = () => r(ABORTED); });
+    this.abortWaiters.add(abort);
+    Promise.resolve(promise).catch(() => {}); // a late failure after we gave up isn't an error
+    try { return await Promise.race([promise, aborted]); }
+    finally { this.abortWaiters.delete(abort); }
+  },
+  skipPast: null,
 
   queue() { return S.state.queue || []; },
   find(uid) { return this.queue().find(t => t.uid === uid); },
@@ -457,9 +485,17 @@ const engine = {
     this.cur = { deck, track: t };
     report({ currentUid: t.uid, playing: false, position: 0, duration: t.duration, message: 'Loading…' });
     this.loading = 'Loading ' + t.title; render();
+    report({ message: this.loading });
     try {
-      if (deck === sp) await sp.start(t, 1);
-      else { await deck.load(t); deck.setLevel(1); await deck.play(); }
+      const loaded = await this.wait(deck === sp ? sp.start(t, 1) : deck.load(t));
+      if (loaded === ABORTED) {
+        // A newer command (another skip, stop…) arrived; let it take over.
+        this.loading = null;
+        if (deck !== sp) deck.unload(); else sp.stop();
+        if (this.cur && this.cur.track.uid === t.uid) this.cur = { deck, track: t, loadingAborted: true };
+        return;
+      }
+      if (deck !== sp) { deck.setLevel(1); await deck.play(); }
       log(`Playing: ${t.title}`);
     } catch (e) {
       this.cur = null;
@@ -476,7 +512,11 @@ const engine = {
   },
 
   async command(c) {
-    const cur = this.cur;
+    let cur = this.cur;
+    if (cur && cur.loadingAborted && c.type !== 'next' && c.type !== 'prev') {
+      // The current song never finished loading; start it again for play/resume.
+      if (c.type === 'resume' || c.type === 'toggle') { this.cur = null; return this.playTrack(cur.track); }
+    }
     switch (c.type) {
       case 'play': return this.playTrack(this.find(c.uid));
       case 'toggle': return this.paused || !cur ? this.command({ type: 'resume' }) : this.command({ type: 'pause' });
@@ -489,10 +529,29 @@ const engine = {
         return;
       case 'next': {
         if (!cur) return this.playTrack(this.after(S.state.currentUid) || this.queue()[0]);
-        if (this.nxt && !this.nxt.ready && this.nxt.promise) { this.loading = 'Loading ' + this.nxt.track.title; render(); await this.nxt.promise; this.loading = null; }
-        if (this.nxt && this.nxt.ready && !this.paused) return this.transition(Math.min(2, this.fadeSeconds(cur.track, this.nxt.track)));
-        const n = this.after(cur.track.uid);
-        if (n) return this.playTrack(n);
+        const n = this.nxt;
+        // Skip pressed again while the next song was still downloading: jump past it.
+        if (this.skipPast && n && n.track.uid === this.skipPast) {
+          this.skipPast = null;
+          const beyond = this.after(n.track.uid);
+          log(`Skipped "${n.track.title}" while it was still loading`);
+          if (beyond) return this.playTrack(beyond);
+          return;
+        }
+        this.skipPast = null;
+        if (n && !n.ready && n.promise) {
+          this.loading = 'Loading next song: ' + n.track.title;
+          render(); report();
+          const r = await this.wait(n.promise);
+          this.loading = null;
+          if (r === ABORTED) {
+            if (this.lastInterrupt === 'next') this.skipPast = n.track.uid;
+            return;
+          }
+        }
+        if (this.nxt && this.nxt.ready && !this.paused && cur.deck.playing) return this.transition(Math.min(2, this.fadeSeconds(cur.track, this.nxt.track)));
+        const target = this.nxt && this.nxt.ready ? this.nxt.track : this.after(cur.track.uid);
+        if (target) return this.playTrack(target);
         return;
       }
       case 'prev': {
@@ -578,6 +637,7 @@ function connect() {
     const c = JSON.parse(e.data);
     // A skip during a long crossfade shouldn't wait for it: jump the fades to their end now.
     if (c.type !== 'volume') engine.finishTransition();
+    if (['next', 'prev', 'play', 'stop', 'pause', 'toggle', 'resume'].includes(c.type)) engine.interrupt(c.type);
     engine.run(() => engine.command(c));
   });
   es.onerror = () => { $('#conn').textContent = 'Reconnecting to server…'; };
@@ -678,9 +738,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (AUTO) boot();
   else $('#start').addEventListener('click', boot, { once: true });
   if (HOST === 'browser') document.title = 'MixDeck Player (keep open)';
-  $('#playbtn').addEventListener('click', () => engine.run(() => engine.command({ type: 'toggle' })));
-  $('#nextbtn').addEventListener('click', () => engine.run(() => engine.command({ type: 'next' })));
-  $('#prevbtn').addEventListener('click', () => engine.run(() => engine.command({ type: 'prev' })));
+  $('#playbtn').addEventListener('click', () => { engine.finishTransition(); engine.interrupt('toggle'); engine.run(() => engine.command({ type: 'toggle' })); });
+  $('#nextbtn').addEventListener('click', () => { engine.finishTransition(); engine.interrupt('next'); engine.run(() => engine.command({ type: 'next' })); });
+  $('#prevbtn').addEventListener('click', () => { engine.finishTransition(); engine.interrupt('prev'); engine.run(() => engine.command({ type: 'prev' })); });
   $('#vol').addEventListener('input', e => setMaster(Number(e.target.value)));
   window.addEventListener('beforeunload', e => { if (engine.cur && engine.cur.deck.playing) { e.preventDefault(); e.returnValue = ''; } });
 });
