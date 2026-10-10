@@ -44,3 +44,8 @@ anyhow = "1"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
+
+# rustypipe's JavaScript engine has no prebuilt bindings for Android, so generate them
+# at build time (CI points bindgen at the NDK's headers).
+[target.'cfg(target_os = "android")'.dependencies]
+rquickjs-sys = { version = "0.9", features = ["bindgen"] }
