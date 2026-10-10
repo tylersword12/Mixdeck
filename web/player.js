@@ -422,6 +422,19 @@ const engine = {
     if (!this.cur || this.paused || this.trans || this.busy) return;
     const d = this.cur.deck;
     const dur = d.duration, pos = d.position;
+    if (d === sp) {
+      const uid = this.cur.track.uid;
+      if (d.playing) this.spLast = { uid, pos, dur };
+      // Spotify often stops a moment before its reported duration (paused, position back
+      // at 0). If it was playing within the last few seconds of the song, that's the end.
+      else if (this.spLast && this.spLast.uid === uid && this.spLast.dur && this.spLast.dur - this.spLast.pos < 4000) {
+        this.spLast = null;
+        log('Spotify finished ' + this.cur.track.title);
+        this.busy = true;
+        this.run(() => this.nxt && this.nxt.ready ? this.transition(0) : this.onEndedInner(d)).finally(() => { this.busy = false; });
+        return;
+      }
+    }
     if (!dur || !d.playing) return;
     const remaining = dur - pos;
     const n = this.nxt;
