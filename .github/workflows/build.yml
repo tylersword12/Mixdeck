@@ -136,7 +136,7 @@ jobs:
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
           "$BT/zipalign" -f -p 4 "$APK" "$RUNNER_TEMP/aligned.apk"
           "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.keystore" --ks-pass "pass:$PASS" \
-            --ks-key-alias mixdeck --out out/MixDeck-Android.apk "$RUNNER_TEMP/aligned.apk"
+            --ks-key-alias mixdeck --v4-signing-enabled false --out out/MixDeck-Android.apk "$RUNNER_TEMP/aligned.apk"
           "$BT/apksigner" verify out/MixDeck-Android.apk
           ls -la out
 
