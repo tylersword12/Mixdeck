@@ -46,6 +46,9 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/spotify/logout", post(spotify_logout))
         .route("/api/spotify/token", get(spotify_token))
         .route("/api/accounts/switch", post(account_switch))
+        .route("/api/update", get(|| async { Json(serde_json::to_value(crate::updates::state()).unwrap_or_default()) }))
+        .route("/api/update/check", post(|State(app): S| async move { Json(serde_json::to_value(app.check_updates().await).unwrap_or_default()) }))
+        .route("/api/update/install", post(update_install))
         .route("/api/accounts/remove", post(account_remove))
         .route("/api/search", get(search))
         .route("/api/resolve", post(resolve))
@@ -242,6 +245,22 @@ async fn account_remove(State(app): S, ConnectInfo(addr): Addr, Json(b): Json<Va
     app.account_remove(&s(&b["service"]), &s(&b["id"]))?;
     app.broadcast_info();
     Ok(Json(app.info()))
+}
+
+async fn update_install(State(app): S, ConnectInfo(addr): Addr) -> ApiResult<Json<Value>> {
+    require_local(&app, &addr)?;
+    let r = app.install_update(true).await?;
+    if app.host.platform() != "android" {
+        // The installer waits for MixDeck to exit, then replaces it and starts the new version.
+        let a = app.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            a.save_all();
+            a.kill_browser_player();
+            a.host.quit_now();
+        });
+    }
+    Ok(Json(r))
 }
 
 fn html_escape(s: &str) -> String { s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;") }
@@ -518,6 +537,7 @@ async fn settings(State(app): S, ConnectInfo(addr): Addr, Json(b): Json<Value>) 
         if has("preloadAhead") { st.preload_ahead = (num(&b["preloadAhead"], 2.0) as u32).clamp(1, 5); }
         if has("closeToTray") { st.close_to_tray = truthy(&b["closeToTray"]); }
         if has("startWithWindows") { st.start_with_windows = truthy(&b["startWithWindows"]); }
+        if has("checkUpdates") { st.check_updates = truthy(&b["checkUpdates"]); }
         restart_player = if has("playerHost") {
             let v = s(&b["playerHost"]);
             let v = if ["auto", "app", "browser"].contains(&v.as_str()) { v } else { "auto".into() };

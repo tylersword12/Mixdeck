@@ -16,6 +16,14 @@ Download from this repository's **Releases** page (the `latest` release is rebui
 
 A setup wizard walks you through Spotify, SoundCloud, YouTube and (on computers) connecting your phone as a remote.
 
+### Updates
+
+MixDeck checks this repository's `latest` release when it starts (Settings → Updates; you can turn it off there). On Windows and Linux, closing MixDeck with an update available asks whether to install it. Windows installs silently, the AppImage replaces itself, and .deb/.rpm installs ask for your password. Android asks when the app opens and downloads the new APK in your browser; tap it to install. You can also update any time from Settings → Updates.
+
+### Accounts
+
+You can link several Spotify and SoundCloud accounts and switch between them in Settings, or from the account picker at the top of the Library. Each extra Spotify account must be added under User Management in your Spotify developer app (and have Premium).
+
 ## How it works
 
 - **The app** (Tauri + Rust) runs a small local server on port 8787. Its window and your phone's browser use the same interface.
@@ -36,7 +44,9 @@ Closing the window quits MixDeck by default, because GNOME hides tray icons unle
 
 ## Building
 
-Every push to `main` is built by GitHub Actions (`.github/workflows/build.yml`) for Windows, Linux and Android, and published as the `latest` release. Tagging `v2.1.0` publishes a versioned release.
+Every push to `main` is built by GitHub Actions (`.github/workflows/build.yml`) for Windows, Linux and Android, and published as the `latest` release with a `version.json` that installed copies check. Builds are versioned `2.1.<run number>`. Tagging `v2.1.0` publishes a versioned release.
+
+The Android build is signed with a key kept in two repository secrets, `ANDROID_KEYSTORE_B64` (the keystore, base64) and `ANDROID_KEYSTORE_PASSWORD`. Keep a copy of the key somewhere safe: Android only installs updates signed with the same key.
 
 Locally, install [Rust](https://rustup.rs) plus the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS, then:
 
@@ -66,10 +76,11 @@ core/            Rust server: API, Spotify, SoundCloud, YouTube, media cache, pl
   src/ytnative.rs    built-in YouTube client (Android)
   src/cache.rs       ahead-of-time audio downloads that can play while arriving
   src/browser.rs     default-browser detection and the browser player fallback
+  src/accounts.rs    several linked Spotify/SoundCloud accounts
+  src/updates.rs     update check and install from GitHub releases
 src-tauri/       App shell: windows, tray, autostart, installer and Android config
   android-overlay/   Android activity + background playback service
-  android-signing/   APK signing key (see its README)
-scripts/         android-patch.py: wires the overlay into the generated Android project
+scripts/         android-patch.py (wires the overlay into the Android project), stamp-version.js
 web/             Interface: remote/app UI, player (crossfade engine), setup wizard
 ```
 

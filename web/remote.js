@@ -651,6 +651,8 @@ async function renderSettings() {
     <div id="join-qr" class="join" style="margin-top:10px"></div>
   </div>
 `}
+  ${updateSection(info)}
+
   <div class="set">
     <h3>Playback</h3>
     <label>Crossfade: <b id="xf-val">${s.crossfade}s</b></label>
@@ -744,6 +746,7 @@ async function renderSettings() {
   const io = $('#import-old'); if (io) io.onclick = importOld;
   const sl = $('#show-log'); if (sl) sl.onclick = showLog;
   bindAccountButtons(box, renderSettings);
+  bindUpdateSection(box);
   const saveProfile = async value => {
     const btn = $('#sc-user-save'), msg = $('#sc-user-msg');
     btn.disabled = true; msg.innerHTML = value ? '<p>Looking up profile…</p>' : '';
@@ -809,6 +812,70 @@ function fitQueueColumn() {
 }
 window.addEventListener('resize', fitQueueColumn);
 
+// ---- Updates ----------------------------------------------------------------------
+function updateSection(info) {
+  const u = info.update || {};
+  const isAndroid = info.platform === 'android';
+  const cur = `${esc(info.version)}${info.build ? ` (build ${info.build})` : ''}`;
+  let status;
+  if (u.installing != null) status = `<p>Downloading the update…</p><div class="upd-bar"><div style="width:${Math.round(u.installing * 100)}%"></div></div>`;
+  else if (u.available) status = `<p><span class="pill ok">Update available</span> ${esc(u.latestVersion || 'build ' + u.latest)} is ready. You have ${cur}.</p>
+    <div class="row-actions"><button class="primary" id="upd-install" ${IS_HOST ? '' : 'disabled'}>${isAndroid ? 'Download and install' : 'Update now'}</button></div>
+    <p class="small">${isAndroid ? 'The new version downloads in your browser; tap it when it finishes and choose Update.' : info.app ? 'MixDeck closes, installs the update and opens again. If you don\'t update now, MixDeck asks when you close it.' : ''}</p>`;
+  else if (!info.build) status = `<p>You're running a development build (${cur}), which doesn't update itself.</p>`;
+  else if (u.checking) status = `<p>Checking…</p>`;
+  else if (u.error) status = `<p>You have ${cur}. <span class="muted">Couldn't check: ${esc(u.error)}</span></p>`;
+  else if (u.checkedAt) status = `<p><span class="pill ok">Up to date</span> You have ${cur}.</p>`;
+  else status = `<p>You have ${cur}.</p>`;
+  return `<div class="set" id="upd-set">
+    <h3>Updates</h3>
+    ${status}
+    <label class="switch"><input type="checkbox" id="upd-auto" ${info.settings.checkUpdates !== false ? 'checked' : ''} ${IS_HOST ? '' : 'disabled'}> Check for updates when MixDeck starts</label>
+    <div class="row-actions"><button class="ghost" id="upd-check" ${info.build ? '' : 'disabled'}>Check now</button>
+      <a class="btn ghost" href="https://github.com/tylersword12/Mixdeck/releases/latest" target="_blank" rel="noopener">Release page</a></div>
+  </div>`;
+}
+function bindUpdateSection(root) {
+  const c = root.querySelector('#upd-check');
+  if (c) c.onclick = async () => { c.disabled = true; try { await api('/api/update/check', { method: 'POST' }); } catch (e) { toast(e.message, true); } refreshUpdateSection(); };
+  const a = root.querySelector('#upd-auto');
+  if (a) a.onchange = async () => { try { R.info = await api('/api/settings', { method: 'POST', body: { checkUpdates: a.checked } }); toast('Saved'); } catch (e) { toast(e.message, true); } };
+  const i = root.querySelector('#upd-install');
+  if (i) i.onclick = () => installUpdate(i);
+  const rel = root.querySelector('#upd-set a.btn');
+  if (rel && R.info && R.info.app) rel.onclick = e => { e.preventDefault(); openExternal(rel.href); };
+}
+async function installUpdate(btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/api/update/install', { method: 'POST' });
+    toast(r.opened ? 'Downloading in your browser. Tap it when it finishes to install.' : 'Installing the update. MixDeck will reopen in a moment.');
+  } catch (e) { toast(e.message, true); if (btn) btn.disabled = false; }
+}
+async function refreshUpdateSection() {
+  const el = $('#upd-set');
+  if (!el) return;
+  try { R.info = await api('/api/info'); } catch { return; }
+  const tmp = document.createElement('div');
+  tmp.innerHTML = updateSection(R.info);
+  el.replaceWith(tmp.firstElementChild);
+  bindUpdateSection($('#settings'));
+}
+function renderUpdatePill() {
+  const u = R.info && R.info.update, pill = $('#update-pill');
+  if (!pill) return;
+  pill.hidden = !(u && u.available);
+  pill.textContent = u && u.installing != null ? `Updating ${Math.round(u.installing * 100)}%` : 'Update available';
+  pill.onclick = () => { show('settings'); setTimeout(() => { const s = $('#upd-set'); if (s) s.scrollIntoView({ block: 'center' }); }, 300); };
+  // Android has no "close" to ask on, so ask once when the app opens.
+  if (u && u.available && R.info.platform === 'android' && R.info.app && IS_HOST && !R.askedUpdate) {
+    R.askedUpdate = true;
+    openSheet({ title: 'Update available', artist: `MixDeck ${u.latestVersion || 'build ' + u.latest} is ready. You have ${R.info.version}.` }, [
+      ['Download and install', () => installUpdate()],
+    ]);
+  }
+}
+
 function renderHost() {
   const st = R.state.status || {};
   const el = $('#hoststatus');
@@ -870,7 +937,8 @@ function connect() {
     const key = activeAccountKey();
     if (R.acctKey !== undefined && key !== R.acctKey) { R.libStack = []; if (R.view === 'library') renderLibrary(); }
     R.acctKey = key;
-    if (R.view === 'settings') renderSettings();
+    renderUpdatePill();
+    if (R.view === 'settings') { if (R.info.update && R.info.update.installing != null) refreshUpdateSection(); else renderSettings(); }
   });
   es.onopen = () => { R.connected = true; renderHost(); };
   es.onerror = () => { R.connected = false; const el = $('#hoststatus'); el.className = 'pill bad'; el.textContent = 'Server unreachable'; };
@@ -903,7 +971,7 @@ $('#q-clear').onclick = () => { if (confirm('Clear the queue? The current track 
 window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (v && v !== R.view) show(v); });
 window.addEventListener('resize', () => { if ((R.view === 'queue' && WIDE()) || (R.view === 'nowplaying' && !WIDE())) show(R.view); });
 
-api('/api/info').then(i => { R.info = i; R.acctKey = activeAccountKey(); renderHost(); syncEmbeddedPlayer(); if (R.view === 'library') renderLibAccount(); }).catch(() => {});
+api('/api/info').then(i => { R.info = i; R.acctKey = activeAccountKey(); renderUpdatePill(); renderHost(); syncEmbeddedPlayer(); if (R.view === 'library') renderLibAccount(); }).catch(() => {});
 connect();
 setInterval(tickProgress, 500);
 show(location.hash.slice(1) || (WIDE() ? 'search' : 'queue'));

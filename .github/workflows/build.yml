@@ -15,6 +15,9 @@ concurrency:
 
 env:
   TAURI_CLI: "@tauri-apps/cli@^2"
+  # Each build is numbered; installed copies compare this with the latest release.
+  MIXDECK_BUILD: ${{ github.run_number }}
+  MIXDECK_VERSION: 2.1.${{ github.run_number }}
 
 jobs:
   windows:
@@ -28,6 +31,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Stamp version
+        shell: bash
+        run: node scripts/stamp-version.js
 
       - name: Build MixDeck
         run: npx --yes ${{ env.TAURI_CLI }} build --bundles nsis
@@ -55,6 +62,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Stamp version
+        shell: bash
+        run: node scripts/stamp-version.js
 
       - name: Install system libraries
         run: |
@@ -100,6 +111,10 @@ jobs:
         with:
           node-version: 22
 
+      - name: Stamp version
+        shell: bash
+        run: node scripts/stamp-version.js
+
       - name: Point Tauri at the Android NDK
         run: |
           echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
@@ -124,13 +139,12 @@ jobs:
         run: |
           set -e
           mkdir -p out
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-            PASS="$KEYSTORE_PASSWORD"
-          else
-            cp src-tauri/android-signing/mixdeck.keystore "$RUNNER_TEMP/release.keystore"
-            PASS="$(tr -d '\r\n' < src-tauri/android-signing/password.txt)"
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error title=Android signing key missing::Add the ANDROID_KEYSTORE_B64 and ANDROID_KEYSTORE_PASSWORD repository secrets (Settings > Secrets and variables > Actions)."
+            exit 1
           fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          PASS="$KEYSTORE_PASSWORD"
           APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*release*.apk' | head -n 1)
           echo "Unsigned APK: $APK"
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
@@ -165,7 +179,11 @@ jobs:
         run: |
           ls -la dist
           if [ -z "$(ls -A dist 2>/dev/null)" ]; then echo "Nothing built"; exit 1; fi
-          NOTES="Built from ${GITHUB_SHA::7}.
+          # What installed copies of MixDeck read to see if they're out of date.
+          ASSETS=$(ls dist | python3 -c 'import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))')
+          echo "{\"build\": $MIXDECK_BUILD, \"version\": \"$MIXDECK_VERSION\", \"sha\": \"$GITHUB_SHA\", \"assets\": $ASSETS}" > dist/version.json
+          cat dist/version.json
+          NOTES="MixDeck $MIXDECK_VERSION, built from ${GITHUB_SHA::7}. Installed copies of MixDeck find this update by themselves.
 
           - **Windows:** MixDeck-Setup.exe. SmartScreen may warn because it isn't code-signed: More info, then Run anyway.
           - **Linux:** MixDeck-linux-amd64.deb (Ubuntu/Debian/Mint), MixDeck-linux-x86_64.rpm (Fedora/openSUSE), or MixDeck-linux-x86_64.AppImage (any distro: chmod +x, then run).

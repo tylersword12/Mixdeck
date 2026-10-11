@@ -91,6 +91,11 @@ body.replaced #replaced-note { display: block; background: var(--bad); color: #f
 .r-head { position: sticky; top: 0; z-index: 5; background: rgba(15,15,20,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .banner { background: rgba(255,93,108,.12); color: var(--bad); border-bottom: 1px solid rgba(255,93,108,.3); padding: 8px 16px; font-size: 13.5px; }
 .banner:empty { display: none; }
+.head-r { display: flex; gap: 8px; align-items: center; }
+#update-pill { background: rgba(124,108,255,.15); color: var(--accent); border-color: rgba(124,108,255,.5); cursor: pointer; font: inherit; font-size: 12.5px; padding: 3px 10px; }
+#update-pill[hidden] { display: none; }
+.upd-bar { height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; margin: 8px 0; }
+.upd-bar > div { height: 100%; background: var(--accent); }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr); max-width: 1280px; margin: 0 auto; }
 .layout > * { min-width: 0; }
 .remote { overflow-x: hidden; }

@@ -25,6 +25,8 @@ pub trait Host: Send + Sync + 'static {
     fn show_main(&self) {}
     /// "windows", "linux", "macos" or "android".
     fn platform(&self) -> &'static str { std::env::consts::OS }
+    /// Exit MixDeck right away (used after starting an update's installer).
+    fn quit_now(&self) { std::process::exit(0); }
 }
 
 pub struct HeadlessHost;
@@ -62,7 +64,7 @@ impl Options {
             spotify_api_base: env("SPOTIFY_API_BASE", "https://api.spotify.com/v1"),
             spotify_accounts_base: env("SPOTIFY_ACCOUNTS_BASE", "https://accounts.spotify.com"),
             ytdlp_path: std::env::var("YTDLP_PATH").ok().map(PathBuf::from),
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: crate::updates::version_string(),
         }
     }
 }
@@ -279,6 +281,8 @@ impl App {
                 "accounts": sc_accounts,
             },
             "settings": c.settings,
+            "build": crate::updates::current_build(),
+            "update": crate::updates::state(),
         })
     }
 

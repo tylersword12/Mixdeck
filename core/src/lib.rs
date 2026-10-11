@@ -10,6 +10,7 @@ pub mod routes;
 pub mod soundcloud;
 pub mod spotify;
 pub mod store;
+pub mod updates;
 pub mod util;
 pub mod youtube;
 #[cfg(feature = "native-youtube")]
@@ -39,6 +40,13 @@ pub async fn start(opts: Options, host: Arc<dyn Host>) -> anyhow::Result<Arc<App
     });
     let a = app.clone();
     tokio::spawn(async move { a.cache_prune().await; });
+    // Look for a newer build shortly after starting.
+    let a = app.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+        let on = a.config.lock().data.settings.check_updates;
+        if on && updates::current_build() > 0 { a.check_updates().await; }
+    });
     Ok(app)
 }
 

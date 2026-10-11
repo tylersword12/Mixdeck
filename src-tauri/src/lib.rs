@@ -55,6 +55,14 @@ impl Host for TauriHost {
         h.dialog().file().set_title("Choose your old MixDeck folder").blocking_pick_folder().and_then(|p| p.into_path().ok())
     }
 
+    fn quit_now(&self) {
+        match self.handle.get().cloned() {
+            #[cfg(desktop)]
+            Some(h) => { let h2 = h.clone(); let _ = h.run_on_main_thread(move || exit_now(&h2)); }
+            _ => std::process::exit(0),
+        }
+    }
+
     fn restart_player(&self) {
         if let (Some(h), Some(core)) = (self.handle.get().cloned(), self.core()) {
             // Window work has to happen on the main thread.
@@ -168,8 +176,42 @@ fn create_main(h: &AppHandle, core: &Arc<App>, visible: bool) -> tauri::Result<(
     Ok(())
 }
 
+/// Quit from the tray or by closing the window. If a newer MixDeck is on GitHub, ask
+/// whether to install it first.
 #[cfg(desktop)]
 fn quit(h: &AppHandle) {
+    static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let up = mixdeck_core::updates::state();
+    if !up.available || up.installing.is_some() || ASKED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return exit_now(h);
+    }
+    for (_, w) in h.webview_windows() { let _ = w.hide(); }
+    let h = h.clone();
+    // Dialogs block, and must not block the main thread.
+    std::thread::spawn(move || {
+        let version = up.latest_version.clone().unwrap_or_else(|| format!("build {}", up.latest.unwrap_or(0)));
+        let yes = h.dialog()
+            .message(format!("A new version of MixDeck is available ({version}). You have {}.\n\nInstall it now? MixDeck downloads the update and installs it after it closes.", mixdeck_core::updates::version_string()))
+            .title("MixDeck update")
+            .buttons(tauri_plugin_dialog::MessageDialogButtons::OkCancelCustom("Update".into(), "Not now".into()))
+            .blocking_show();
+        if yes {
+            if let Some(core) = h.try_state::<Arc<App>>() {
+                let core = core.inner().clone();
+                if let Err(e) = tauri::async_runtime::block_on(core.install_update(false)) {
+                    mixdeck_core::logf!("[update] {}", e.message);
+                    h.dialog().message(format!("The update couldn't be installed.\n\n{}", e.message))
+                        .title("MixDeck update").kind(MessageDialogKind::Error).blocking_show();
+                }
+            }
+        }
+        let h2 = h.clone();
+        let _ = h.run_on_main_thread(move || exit_now(&h2));
+    });
+}
+
+#[cfg(desktop)]
+fn exit_now(h: &AppHandle) {
     if let Some(core) = h.try_state::<Arc<App>>() {
         core.save_all();
         core.kill_browser_player();
