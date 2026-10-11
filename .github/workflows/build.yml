@@ -136,23 +136,7 @@ jobs:
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-        run: |
-          set -e
-          mkdir -p out
-          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
-            echo "::error title=Android signing key missing::Add the ANDROID_KEYSTORE_B64 and ANDROID_KEYSTORE_PASSWORD repository secrets (Settings > Secrets and variables > Actions)."
-            exit 1
-          fi
-          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-          PASS="$KEYSTORE_PASSWORD"
-          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*release*.apk' | head -n 1)
-          echo "Unsigned APK: $APK"
-          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
-          "$BT/zipalign" -f -p 4 "$APK" "$RUNNER_TEMP/aligned.apk"
-          "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.keystore" --ks-pass "pass:$PASS" \
-            --ks-key-alias mixdeck --v4-signing-enabled false --out out/MixDeck-Android.apk "$RUNNER_TEMP/aligned.apk"
-          "$BT/apksigner" verify out/MixDeck-Android.apk
-          ls -la out
+        run: scripts/ci-run.sh scripts/android-sign.sh
 
       - uses: actions/upload-artifact@v4
         with:
