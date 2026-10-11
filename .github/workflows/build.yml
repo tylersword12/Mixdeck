@@ -164,7 +164,7 @@ jobs:
   # published even if another platform failed.
   release:
     needs: [windows, linux, android]
-    if: always() && github.event_name == 'push'
+    if: ${{ !cancelled() && github.event_name == 'push' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
