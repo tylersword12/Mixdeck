@@ -12,6 +12,7 @@ pub mod spotify;
 pub mod store;
 pub mod updates;
 pub mod util;
+pub mod visionos;
 pub mod youtube;
 #[cfg(feature = "native-youtube")]
 pub mod ytnative;
@@ -46,6 +47,7 @@ pub async fn start(opts: Options, host: Arc<dyn Host>) -> anyhow::Result<Arc<App
         tokio::time::sleep(std::time::Duration::from_secs(4)).await;
         let on = a.config.lock().data.settings.check_updates;
         if on && updates::current_build() > 0 { a.check_updates().await; }
+        a.ytdlp_auto_update().await;
     });
     Ok(app)
 }

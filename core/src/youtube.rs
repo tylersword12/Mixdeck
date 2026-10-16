@@ -202,6 +202,8 @@ impl App {
         #[cfg(feature = "native-youtube")]
         return self.ytn_download(id, dir, tx, on_progress).await;
         #[allow(unreachable_code)]
+        let on_progress: Arc<dyn Fn(f64) + Send + Sync> = Arc::new(on_progress);
+        let on_progress_fallback = on_progress.clone();
         let file: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let f2 = file.clone();
         let tx2 = tx.clone();
@@ -257,7 +259,23 @@ impl App {
         let result = self.ytdlp_run(&args, 600, Some(cb)).await;
         stop.store(true, std::sync::atomic::Ordering::SeqCst);
         let _ = poller.await;
-        result?;
+        if let Err(e) = result {
+            // yt-dlp couldn't get it (often right after a YouTube change, before yt-dlp's fix
+            // lands). If nothing reached the player yet, try NewPipe's visionOS approach.
+            let written = tx.borrow().written;
+            if written > 0 || e.status.as_u16() == 422 { return Err(e); }
+            crate::logf!("[youtube] yt-dlp failed ({}); trying the visionOS client", e.message);
+            if let Ok(mut rd) = tokio::fs::read_dir(dir).await {
+                while let Ok(Some(ent)) = rd.next_entry().await {
+                    if ent.file_name().to_string_lossy().starts_with("audio.") { let _ = tokio::fs::remove_file(ent.path()).await; }
+                }
+            }
+            let prog = on_progress_fallback.clone();
+            return match self.vos_download(id, dir, &tx, &move |p| prog(p)).await {
+                Ok(v) => Ok(v),
+                Err((e2, _)) => { crate::logf!("[youtube] visionOS client failed too: {}", e2.message); Err(e) }
+            };
+        }
         let mut name = file.lock().clone();
         if name.as_ref().map(|n| !dir.join(n).exists()).unwrap_or(true) {
             name = None;
@@ -381,6 +399,24 @@ impl App {
             *self.tools.js_cache.lock() = None;
         }
         Ok(())
+    }
+
+    /// Keep yt-dlp current without anyone having to press "Update": YouTube changes often
+    /// and yt-dlp ships fixes within days. Checks at most once a day, in the background.
+    pub async fn ytdlp_auto_update(&self) {
+        #[cfg(feature = "native-youtube")]
+        return;
+        #[allow(unreachable_code)]
+        if self.opts.ytdlp_path.is_some() || !self.local_ytdlp().exists() { return; }
+        let marker = self.bin_dir().join("yt-dlp.checked");
+        let fresh = std::fs::metadata(&marker).and_then(|m| m.modified()).ok()
+            .and_then(|t| t.elapsed().ok()).map(|age| age < std::time::Duration::from_secs(20 * 3600)).unwrap_or(false);
+        if fresh { return; }
+        match self.tools_update().await {
+            Ok(v) => crate::logf!("[youtube] yt-dlp update check: {}", v["output"].as_str().unwrap_or("done")),
+            Err(e) => crate::logf!("[youtube] yt-dlp update check failed: {}", e.message),
+        }
+        let _ = std::fs::write(&marker, crate::util::now_ms().to_string());
     }
 
     pub async fn tools_update(&self) -> ApiResult {

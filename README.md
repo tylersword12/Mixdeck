@@ -29,7 +29,7 @@ You can link several Spotify and SoundCloud accounts and switch between them in 
 - **The app** (Tauri + Rust) runs a small local server on port 8787. Its window and your phone's browser use the same interface.
 - **The player** is a hidden page inside MixDeck that plays the audio and does the crossfades. Spotify's player needs browser DRM (Widevine). If that doesn't work inside the app, MixDeck moves the player to your default browser: a separate small window with its own profile. You can change this in Settings → Player.
 - **SoundCloud** uses the website's own internal API, the same way NewPipe does (`core/src/soundcloud.rs`).
-- **YouTube** on Windows and Linux uses [yt-dlp](https://github.com/yt-dlp/yt-dlp), which MixDeck downloads along with a JavaScript runtime. On Android, where yt-dlp can't run, MixDeck has a built-in YouTube client ([RustyPipe](https://codeberg.org/ThetaDev/rustypipe), NewPipe's approach in Rust).
+- **YouTube** audio uses the same workaround NewPipe adopted in 2026 after YouTube began enforcing its SABR streaming protocol: it asks for streams as YouTube's visionOS (Apple Vision Pro) app, whose links play without YouTube's JavaScript (`core/src/visionos.rs`). On Windows and Linux, [yt-dlp](https://github.com/yt-dlp/yt-dlp) is tried first (MixDeck downloads it with a JavaScript runtime and updates it daily), with the visionOS client as the fallback. On Android, where yt-dlp can't run, the visionOS client comes first, then [RustyPipe](https://codeberg.org/ThetaDev/rustypipe)'s clients; RustyPipe also handles YouTube search and playlists there.
 - SoundCloud and YouTube tracks are downloaded ahead of time, and start playing while the download is still arriving, so crossfades never stall.
 - **Spotify** uses the official Web API and Web Playback SDK with your own developer app (Premium required).
 - **Your data** (settings, Spotify login, playlists, download cache, tools) lives in `%APPDATA%\MixDeck` on Windows, `~/.local/share/mixdeck` on Linux, and the app's private storage on Android.
@@ -73,7 +73,8 @@ core/            Rust server: API, Spotify, SoundCloud, YouTube, media cache, pl
   src/spotify.rs     PKCE login, Web API (Feb 2026 Development Mode rules)
   src/soundcloud.rs  client_id discovery and internal API (NewPipe approach)
   src/youtube.rs     yt-dlp + JS runtime install, search, downloads (Windows/Linux)
-  src/ytnative.rs    built-in YouTube client (Android)
+  src/ytnative.rs    built-in YouTube search/playlists/download (Android)
+  src/visionos.rs    NewPipe's visionOS-client workaround for YouTube audio (all platforms)
   src/cache.rs       ahead-of-time audio downloads that can play while arriving
   src/browser.rs     default-browser detection and the browser player fallback
   src/accounts.rs    several linked Spotify/SoundCloud accounts
