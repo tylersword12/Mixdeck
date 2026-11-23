@@ -103,7 +103,14 @@ impl App {
 
     /// Return as soon as the track can start playing (fully downloaded, or far enough
     /// along to stream). The download carries on in the background.
-    pub async fn cache_prepare(self: &Arc<Self>, key: &str) -> ApiResult {
+    ///
+    /// `wait` limits how long this holds the request open. Browsers allow only six
+    /// connections to one server, shared by MixDeck's window and its hidden player on the
+    /// PC, so the player asks for short waits and checks back instead of holding a
+    /// connection for a whole download (which left songs added on the PC stuck). When the
+    /// time runs out the answer is `{"pending": true}`. `poll` marks a check-back: if the
+    /// download it is waiting for has failed meanwhile, report that instead of restarting it.
+    pub async fn cache_prepare(self: &Arc<Self>, key: &str, wait: Option<std::time::Duration>, poll: bool) -> ApiResult {
         let dir = self.cache_dir_for(key)?;
         if self.cache_live(key).is_none() {
             if let Some(mut m) = self.cache_meta(key).await {
@@ -113,8 +120,25 @@ impl App {
                 m["partial"] = json!(false);
                 return Ok(m);
             }
+            if poll {
+                let failed = self.cache.status.lock().get(key).filter(|v| v["state"] == "error").map(|v| s(&v["error"]));
+                if let Some(e) = failed {
+                    self.cache.status.lock().remove(key); // asking again later starts a fresh download
+                    return Err(ApiError::new(422, e));
+                }
+            }
         }
-        let mut rx = self.cache_start(key);
+        let rx = self.cache_start(key);
+        match wait {
+            None => self.cache_wait_ready(key, rx).await,
+            Some(d) => match tokio::time::timeout(d, self.cache_wait_ready(key, rx)).await {
+                Ok(r) => r,
+                Err(_) => Ok(json!({ "pending": true })),
+            },
+        }
+    }
+
+    async fn cache_wait_ready(self: &Arc<Self>, key: &str, mut rx: watch::Receiver<Progress>) -> ApiResult {
         loop {
             {
                 let p = rx.borrow_and_update().clone();

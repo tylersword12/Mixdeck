@@ -87,7 +87,15 @@ class ScDeck {
     this.unload();
     this.track = track;
     const token = this.token = Symbol();
-    const prep = await api(`/api/prepare/${track.source}/${encodeURIComponent(track.id)}`, { method: 'POST' });
+    // Ask in short rounds rather than holding one request open for the whole download:
+    // on the PC this page shares the browser's six connections to MixDeck with the main
+    // window, and long-held requests left songs added there stuck waiting.
+    const url = `/api/prepare/${track.source}/${encodeURIComponent(track.id)}?wait=1000`;
+    let prep = await api(url, { method: 'POST' });
+    while (prep.pending) {
+      if (token !== this.token) throw new Error('superseded');
+      prep = await api(url + '&poll=1', { method: 'POST' });
+    }
     if (token !== this.token) throw new Error('superseded');
     this.preview = prep.preview;
     this.partial = !!prep.partial; // still downloading: playback starts now, the rest streams in
@@ -413,7 +421,8 @@ const engine = {
   warmCache(from) {
     let t = from, n = (S.state.settings && S.state.settings.preloadAhead) || 2;
     while (n-- > 0 && (t = this.after(t.uid))) {
-      if (t.source !== 'spotify') api(`/api/prepare/${t.source}/${encodeURIComponent(t.id)}`, { method: 'POST' }).catch(() => {});
+      // Just start the download; don't hold a connection waiting for it.
+      if (t.source !== 'spotify') api(`/api/prepare/${t.source}/${encodeURIComponent(t.id)}?wait=0`, { method: 'POST' }).catch(() => {});
     }
   },
 

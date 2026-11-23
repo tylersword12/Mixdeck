@@ -70,9 +70,12 @@ pub fn router(app: Arc<App>) -> Router {
         }))
         .route("/api/playlists", get(playlists_list).post(playlists_create))
         .route("/api/playlists/{id}", get(playlist_get).put(playlist_update).delete(playlist_delete))
-        .route("/api/prepare/{source}/{id}", post(|State(app): S, Path((source, id)): Path<(String, String)>| async move {
+        .route("/api/prepare/{source}/{id}", post(|State(app): S, Path((source, id)): Path<(String, String)>, Query(q): Query<HashMap<String, String>>| async move {
             let key = cache_key(&source, &id)?;
-            let meta = app.cache_prepare(&key).await?;
+            // ?wait=MS answers within MS milliseconds ({"pending":true} if not ready yet); see cache_prepare.
+            let wait = q.get("wait").and_then(|w| w.parse::<u64>().ok()).map(|ms| std::time::Duration::from_millis(ms.min(20_000)));
+            let meta = app.cache_prepare(&key, wait, q.contains_key("poll")).await?;
+            if meta["pending"] == json!(true) { return Ok::<_, ApiError>(Json(json!({ "pending": true }))); }
             Ok::<_, ApiError>(Json(prepare_response(&key, &meta)))
         }))
         .route("/api/cache/status", get(|State(app): S| async move { Json(json!(app.cache.status.lock().clone())) }))
