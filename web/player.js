@@ -463,6 +463,8 @@ const engine = {
     if (this.nxt && this.nxt.ready) return this.transition(0);
     log('End of playlist');
     await deck.stop();
+    // Remember where the queue ran out, so songs added later carry on from here.
+    this.endedAt = this.cur.track.uid;
     this.cur = null;
     report({ currentUid: S.state.currentUid });
   },
@@ -521,6 +523,7 @@ const engine = {
   async playTrack(t) {
     if (!t) return;
     this.paused = false;
+    this.endedAt = null;
     if (!this.playable(t) && t.source === 'spotify' && !sp.ready) throw new Error('Spotify is not connected; log in from Settings on this computer');
     S.failed.delete(t.uid);
     // Already prepared? Use a quick crossfade instead of a hard cut.
@@ -574,6 +577,8 @@ const engine = {
         if (cur) { await cur.deck.pause(); this.paused = true; log('Paused'); }
         return;
       case 'resume':
+        // After the queue ran out, Play continues with whatever was added since, not the finished song.
+        if (!cur && this.endedAt) return this.playTrack(this.after(this.endedAt) || this.find(this.endedAt) || this.queue().find(t => this.playable(t)));
         if (!cur) return this.playTrack(this.find(S.state.currentUid) || this.queue().find(t => this.playable(t)));
         await cur.deck.resume(); this.paused = false; log('Resumed');
         return;
@@ -614,7 +619,7 @@ const engine = {
       case 'seek': if (cur) await cur.deck.seek(c.ms); return;
       case 'stop':
         if (cur) { await cur.deck.fade(0, 0.3).promise; await cur.deck.stop(); }
-        this.cur = null; this.releaseNext(); this.paused = false;
+        this.cur = null; this.releaseNext(); this.paused = false; this.endedAt = null;
         report({ currentUid: c.clear ? null : S.state.currentUid });
         return;
       case 'volume': setMaster(c.value); return;
@@ -630,6 +635,11 @@ const engine = {
 
   onQueueChanged() {
     if (this.nxt && !this.find(this.nxt.track.uid)) this.releaseNext();
+    // The queue had run out and a song was just added after the last one: start it.
+    if (!this.cur && this.endedAt) {
+      const n = this.after(this.endedAt);
+      if (n) { this.endedAt = null; log(`Continuing with ${n.title}`); this.run(() => this.playTrack(n)); return; }
+    }
     this.prepareNext();
   },
 };
